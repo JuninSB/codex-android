@@ -6,5 +6,8 @@ linker=()
 if [[ "$(uname -m)" != aarch64 ]]; then
     linker=(-C "linker=${CODEX_CHATSTORE_LINKER:-aarch64-linux-gnu-gcc}")
 fi
-rustc --edition=2021 --target aarch64-unknown-linux-gnu -C opt-level=3 -C strip=symbols \
-    -C target-feature=+crt-static "${linker[@]}" runtime/chatstore.rs -o build/runtime/assets/chatstore.bin
+export CARGO_ENCODED_RUSTFLAGS
+CARGO_ENCODED_RUSTFLAGS="$(printf '%s\x1f' -C target-feature=+crt-static "${linker[@]}")"
+CARGO_ENCODED_RUSTFLAGS="${CARGO_ENCODED_RUSTFLAGS%$'\x1f'}"
+cargo build --locked --release --target aarch64-unknown-linux-gnu --manifest-path runtime/Cargo.toml "$@"
+cp runtime/target/aarch64-unknown-linux-gnu/release/chatstore build/runtime/assets/chatstore.bin

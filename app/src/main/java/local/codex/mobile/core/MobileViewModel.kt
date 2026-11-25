@@ -76,7 +76,7 @@ internal class MobileViewModel(application: Application) : AndroidViewModel(appl
     private var vaultSession: CredentialVault.Session? = null
     private val androidInFlight = mutableSetOf<String>()
     private val mutable = MutableStateFlow(MobileState(
-        active = prefs.getString("chat", null), vaultExists = vault.exists(), syncingChat = prefs.contains("chat"),
+        vaultExists = vault.exists(),
         yolo = prefs.getBoolean("yolo", false),
         queue = runCatching { JSONArray(prefs.getString("outbox", "[]")) }.getOrNull().objects().map {
             QueuedMessage(it.getString("id"), it.getString("chat"), it.getString("text"),
@@ -92,6 +92,18 @@ internal class MobileViewModel(application: Application) : AndroidViewModel(appl
     private var lastChat: String? = null
     private val chatCache = mutableMapOf<String, JSONObject>()
     private val drafts = mutableMapOf<String?, Pair<String, List<Attachment>>>()
+    private val catalogPrefs = application.getSharedPreferences("codex-mobile-catalog", 0)
+    private var catalogFingerprint: String? = null
+
+    init {
+        viewModelScope.launch {
+            val titles = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching { JSONArray(catalogPrefs.getString("titles", "[]")) }.getOrNull().objects()
+            }
+            mutable.update { if (!it.connected && it.chats.isEmpty()) it.copy(chats = titles) else it }
+        }
+    }
+
 
     fun setYolo(enabled: Boolean) {
         prefs.edit().putBoolean("yolo", enabled).apply()
@@ -111,10 +123,11 @@ internal class MobileViewModel(application: Application) : AndroidViewModel(appl
                     mutable.update { it.copy(connected = false) }
                     client = runtime.start { message -> mutable.update { it.copy(startup = message) } }
                     lastVersion = -1
-                    refreshAccount()
-                    refresh()
                     mutable.update { it.copy(startup = null, connected = true, connectionError = null) }
-                    lastVersion = -1
+                    kotlinx.coroutines.coroutineScope {
+                        launch { refreshAccount() }
+                        refresh()
+                    }
                     retryDelay = 750L
                     while (true) {
                         val online = connectivity?.let { manager ->
@@ -190,8 +203,17 @@ internal class MobileViewModel(application: Application) : AndroidViewModel(appl
             chatCache[current] = selectedChat
             if (chatCache.size > 6) chatCache.remove(chatCache.keys.first())
         }
+        val titles = data.optJSONArray("chats").objects()
+        val catalog = JSONArray(titles.map { row ->
+            obj("id" to row.optString("id"), "title" to row.optString("title"),
+                "pinned" to row.optBoolean("pinned"), "archived" to row.optBoolean("archived"))
+        }).toString()
+        if (catalog != catalogFingerprint) {
+            catalogFingerprint = catalog
+            catalogPrefs.edit().putString("titles", catalog).apply()
+        }
         mutable.update {
-            it.copy(chat = selectedChat, chats = data.optJSONArray("chats").objects(), syncingChat = false,
+            it.copy(chat = selectedChat, chats = titles, syncingChat = false,
                 approvals = data.optJSONArray("approvals").objects())
         }
     }
@@ -234,7 +256,6 @@ internal class MobileViewModel(application: Application) : AndroidViewModel(appl
         if (id == current.active) return
         drafts[current.active] = current.prompt to current.attachments
         val draft = drafts[id]
-        prefs.edit().putString("chat", id).apply()
         mutable.update {
             it.copy(active = id, chat = chatCache[id], syncingChat = id != null && it.connected, approvals = emptyList(),
                 prompt = draft?.first.orEmpty(), attachments = draft?.second.orEmpty())
@@ -253,7 +274,10 @@ internal class MobileViewModel(application: Application) : AndroidViewModel(appl
         refresh()
     }
 
-    fun select(id: String) = switch(id)
+    fun select(id: String) {
+        switch(id)
+        if (state.value.connected) work { refresh() }
+    }
     fun newChat() = switch(null)
 
     private suspend fun ensureChat(cwd: String? = null): String {
@@ -412,7 +436,7 @@ internal class MobileViewModel(application: Application) : AndroidViewModel(appl
             snapshot.active == null || snapshot.queue.any { it.chat == localChat && it.createChat },
             snapshot.yolo)
         val queue = snapshot.queue + entry
-        if (!prefs.edit().putString("chat", localChat).putString("outbox", encodeQueue(queue)).commit()) {
+        if (!prefs.edit().putString("outbox", encodeQueue(queue)).commit()) {
             report("Não foi possível salvar a mensagem na fila.")
             return
         }

@@ -8,13 +8,13 @@ O botão **Uso** mostra porcentagens restantes de cada janela que o Codex relata
 
 ## Transporte do Codex
 
-No Ubuntu integrado, o binário Rust supervisiona o Codex App Server e encaminha os quadros JSON-RPC entre o serviço e o Codex. O mesmo binário grava o histórico. O servidor Node.js ainda atende o Android e mantém a lógica de sessões, aprovações e arquivos.
+No Ubuntu integrado, o binário Rust supervisiona o Codex App Server e encaminha os quadros JSON-RPC entre o serviço e o Codex. O mesmo binário grava o histórico e mantém um índice leve para abrir o app sem ler as mensagens das conversas. Na primeira abertura após a atualização, os históricos antigos são indexados uma vez. O servidor Node.js ainda atende o Android e mantém a lógica de sessões, aprovações e arquivos.
 
-Para testar o transporte localmente, execute `rustc --edition=2021 --test runtime/chatstore.rs -o /tmp/codex-mobile-rust-tests` e rode `/tmp/codex-mobile-rust-tests`.
+Para testar o transporte localmente, execute `cargo test --locked --manifest-path runtime/Cargo.toml`.
 
 ## Build
 
-Use JDK 17, Gradle 8.10.2, Android SDK 35 com Build Tools 34.0.0 e as ferramentas `curl`, `tar`, `dpkg-deb`, `sha256sum` e `patchelf` (ou Node.js para aplicar a alteração de dependência ELF). Em um host Linux ARM64, forneça um `aapt2` correspondente à arquitetura. O armazenamento de conversas exige `rustc` com o alvo `aarch64-unknown-linux-gnu`. Em compilação cruzada, use `aarch64-linux-gnu-gcc` ou configure `CODEX_CHATSTORE_LINKER`.
+Use JDK 17, Gradle 8.10.2, Android SDK 35 com Build Tools 34.0.0 e as ferramentas `curl`, `tar`, `dpkg-deb`, `sha256sum` e `patchelf` (ou Node.js para aplicar a alteração de dependência ELF). Em um host Linux ARM64, forneça um `aapt2` correspondente à arquitetura. O armazenamento de conversas exige `cargo` e `rustc` com o alvo `aarch64-unknown-linux-gnu`. Em compilação cruzada, use `aarch64-linux-gnu-gcc` ou configure `CODEX_CHATSTORE_LINKER`.
 
 ```sh
 ./build-native.sh :app:testReleaseUnitTest

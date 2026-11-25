@@ -39,7 +39,15 @@ internal class UbuntuRuntime private constructor(private val context: Context) {
             if (process?.isAlive == true && client?.ready() == true && hasStorage == shared) {
                 return@withContext checkNotNull(client)
             }
-            process?.destroy()
+            process?.let { previous ->
+                previous.destroy()
+                if (!previous.waitFor(2, java.util.concurrent.TimeUnit.SECONDS)) {
+                    previous.destroyForcibly()
+                    check(previous.waitFor(2, java.util.concurrent.TimeUnit.SECONDS)) {
+                        "O serviço anterior do Ubuntu ainda está ativo."
+                    }
+                }
+            }
             client = null
             hasStorage = shared
             progress(StartupProgress("Preparando Ubuntu…", "Verificando o ambiente local."))
@@ -143,19 +151,24 @@ internal class UbuntuRuntime private constructor(private val context: Context) {
                 certificates.outputStream().use { source.copyTo(it) }
             }
         }
-        val rules = File(root, "root/.codex/rules/codex-mobile.rules")
-        rules.parentFile?.mkdirs()
-        context.assets.open("codex-mobile.rules").use { src ->
-            rules.outputStream().use { src.copyTo(it) }
+        val versionFile = File(root, "opt/codex-mobile/assets-version")
+        val apk = File(context.applicationInfo.sourceDir)
+        val version = "${apk.path}:${apk.lastModified()}:${apk.length()}"
+        val targets = listOf(
+            "codex-mobile.rules" to File(root, "root/.codex/rules/codex-mobile.rules"),
+            "chatstore.bin" to File(root, "opt/codex-mobile/chatstore"),
+            "server.mjs" to File(root, "opt/codex-mobile/server.mjs")
+        )
+        if (versionFile.isFile && versionFile.readText() == version &&
+            targets.all { (asset, file) -> file.length() > 0 && (asset != "chatstore.bin" || file.canExecute()) }) return
+        for ((asset, destination) in targets) {
+            destination.parentFile?.mkdirs()
+            val temp = File(destination.parentFile, destination.name + ".new")
+            context.assets.open(asset).use { src -> temp.outputStream().use { src.copyTo(it) } }
+            if (asset == "chatstore.bin") check(temp.setExecutable(true, true))
+            check(temp.renameTo(destination)) { "Não foi possível atualizar $asset no Ubuntu." }
         }
-        val chatstore = File(root, "opt/codex-mobile/chatstore")
-        context.assets.open("chatstore.bin").use { source ->
-            chatstore.outputStream().use { source.copyTo(it) }
-        }
-        check(chatstore.setExecutable(true, true)) { "Não foi possível preparar o armazenamento de conversas." }
-        context.assets.open("server.mjs").use { src ->
-            File(root, "opt/codex-mobile/server.mjs").outputStream().use { src.copyTo(it) }
-        }
+        versionFile.writeText(version)
     }
 
     private fun removeStaging(dir: File) {

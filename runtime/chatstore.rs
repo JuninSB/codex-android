@@ -1,10 +1,9 @@
+mod catalog;
 mod relay;
 
 use std::env;
-use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufRead, Write};
-use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
-use std::path::Path;
+use std::path::PathBuf;
 
 fn valid_id(id: &str) -> bool {
     let bytes = id.as_bytes();
@@ -17,32 +16,22 @@ fn valid_id(id: &str) -> bool {
     })
 }
 
-fn write_chat(dir: &Path, id: &str, document: &[u8]) -> io::Result<()> {
-    if !valid_id(id) || !document.starts_with(b"{") || !document.ends_with(b"}") {
-        return Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid chat document"));
-    }
-    let staging = dir.join(format!("{id}.tmp"));
-    let mut file = OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&staging)?;
-    file.write_all(document)?;
-    file.sync_data()?;
-    fs::rename(staging, dir.join(format!("{id}.json")))?;
-    File::open(dir)?.sync_all()
-}
-
 fn main() -> io::Result<()> {
     let mut args = env::args_os().skip(1);
-    let dir = args.next().ok_or(io::ErrorKind::InvalidInput)?;
-    if dir == "--relay" {
+    let mode = args.next().ok_or(io::ErrorKind::InvalidInput)?;
+    if mode == "--relay" {
         std::process::exit(relay::run(args)?);
     }
-    let dir = Path::new(&dir);
-    fs::DirBuilder::new().recursive(true).mode(0o700).create(dir)?;
-    let output = io::stdout();
-    let mut out = output.lock();
+    let directory = if mode == "--index" { args.next().ok_or(io::ErrorKind::InvalidInput)? } else { mode.clone() };
+    let mut catalog = catalog::Catalog::open(PathBuf::from(directory))?;
+    let mut out = io::stdout().lock();
+    if mode == "--index" {
+        catalog.print(&mut out)?;
+        return out.flush();
+    }
     for line in io::stdin().lock().lines() {
         let line = line?;
-        let success = line.split_once('\t')
-            .is_some_and(|(id, body)| write_chat(dir, id, body.as_bytes()).is_ok());
+        let success = line.split_once('\t').is_some_and(|(id, body)| catalog.save(id, body).is_ok());
         writeln!(out, "{}", if success { "ok" } else { "error" })?;
         out.flush()?;
     }

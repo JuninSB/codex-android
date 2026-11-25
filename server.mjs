@@ -4,7 +4,8 @@ import { createReadStream } from 'node:fs';
 import { gzipSync } from 'node:zlib';
 import path from 'node:path';
 import os from 'node:os';
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
+import { promisify } from 'node:util';
 import { createInterface } from 'node:readline';
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -23,6 +24,8 @@ const store = path.join(stateDir, 'chats.json');
 const segmentedStore = process.env.CODEX_MOBILE_CHATSTORE;
 const chatDirectory = path.join(stateDir, 'chats-v2');
 const chats = new Map();
+const summaries = new Map();
+const loadingChats = new Map();
 const itemVersions = new WeakMap();
 let version = 0;
 function restore(chat) {
@@ -46,13 +49,26 @@ async function readLegacy() {
     return [];
   }
 }
-for (const chat of await readLegacy()) restore(chat);
 if (segmentedStore) {
-  await fs.mkdir(chatDirectory, { recursive: true, mode: 0o700 });
-  for (const entry of await fs.readdir(chatDirectory)) {
-    if (/^[a-f0-9-]{36}\.json$/.test(entry)) {
-      restore(JSON.parse(await fs.readFile(path.join(chatDirectory, entry), 'utf8')));
-    }
+  const { stdout } = await promisify(execFile)(segmentedStore, ['--index', chatDirectory], {
+    maxBuffer: 32 * 1024 * 1024,
+  });
+  for (const row of JSON.parse(stdout)) {
+    if (!row.deleted) summaries.set(row.id, row);
+  }
+} else {
+  for (const chat of await readLegacy()) {
+    restore(chat);
+    if (!chat.deleted) summaries.set(chat.id, chat);
+  }
+}
+
+function updateSummary(chat) {
+  if (chat.deleted) {
+    summaries.delete(chat.id);
+  } else {
+    const { id, title, cwd, createdAt, pinned, archived } = chat;
+    summaries.set(id, { id, title, cwd, createdAt, pinned, archived });
   }
 }
 
@@ -100,6 +116,7 @@ function save(changed) {
       await fs.writeFile(store + '.tmp', legacy, { mode: 0o600 });
       await fs.rename(store + '.tmp', store);
     }
+    for (const chat of Array.isArray(changed) ? changed : [changed]) updateSummary(chat);
   });
   return writeQueue;
 }
@@ -482,10 +499,24 @@ async function createChat(id, requestedDirectory) {
 }
 
 const imagePath = file => /\.(png|jpe?g|webp|gif)$/i.test(file);
-function getChat(id) {
-  const chat = chats.get(id);
-  if (!chat) throw Object.assign(new Error('Conversa não encontrada.'), { status: 404 });
-  return chat;
+async function getChat(id) {
+  if (chats.has(id)) return chats.get(id);
+  if (!segmentedStore || !summaries.has(id)) {
+    throw Object.assign(new Error('Conversa não encontrada.'), { status: 404 });
+  }
+  let loading = loadingChats.get(id);
+  if (!loading) {
+    loading = fs.readFile(path.join(chatDirectory, id + '.json'), 'utf8').then(text => {
+      const chat = JSON.parse(text);
+      if (chat.id !== id || chat.deleted) {
+        throw Object.assign(new Error('Conversa não encontrada.'), { status: 404 });
+      }
+      restore(chat);
+      return chat;
+    }).finally(() => loadingChats.delete(id));
+    loadingChats.set(id, loading);
+  }
+  return loading;
 }
 function idle(chat) {
   if (chat.running) throw Object.assign(new Error('A conversa está em andamento.'), { status: 409 });
@@ -533,18 +564,19 @@ http.createServer(async (request, response) => {
       if (route === 'api/health') return reply({});
       if (route === 'api/state') {
         const id = url.searchParams.get('chat');
+        const cached = chats.has(id);
+        const selected = (cached || summaries.has(id)) ? await getChat(id) : undefined;
         const requests = [...approvals.values()];
-        const since = url.searchParams.get('since');
+        const since = id && !cached ? null : url.searchParams.get('since');
         if (since !== null && Number(since) === version) return reply({ version, unchanged: true,
           automatic: requests.filter(a => a.automatic) });
-        const selected = chats.get(id);
         const messagesDelta = selected && since !== null && /^\d+$/.test(since) && Number(since) <= version;
         const chat = messagesDelta ? { ...selected, messages: selected.messages.filter(entry =>
           (itemVersions.get(entry) || 0) > Number(since)) } : selected;
         return reply({ version, chat, messagesDelta: Boolean(messagesDelta), approvals: requests.filter(a => a.chatId === id && !a.automatic),
           automatic: requests.filter(a => a.automatic),
-          chats: [...chats.values()].reverse().sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
-            .map(({ id, title, cwd, running, pinned, archived }) => ({ id, title, cwd, running, pinned, archived })) });
+          chats: [...summaries.values()].reverse().sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+            .map(({ id, title, pinned, archived }) => ({ id, title, running: chats.get(id)?.running === true, pinned, archived })) });
       }
       if (route === 'api/media') {
         const file = await selectable(url.searchParams.get('path') || '', true);
@@ -649,7 +681,7 @@ http.createServer(async (request, response) => {
       const id = url.searchParams.get('chat');
       const rawName = url.searchParams.get('name') || 'arquivo';
       const name = path.basename(rawName).replace(/[^\p{L}\p{N}._ -]/gu, '_').slice(-110);
-      const chat = getChat(id);
+      const chat = await getChat(id);
       const folder = path.join(chat.storage || workspace, id, 'Anexos');
       const content = await bytes(request, 25 * 1024 * 1024);
       await fs.mkdir(folder, { recursive: true });
@@ -702,13 +734,13 @@ http.createServer(async (request, response) => {
       const id = data.id || randomUUID();
       let creation = creatingChats.get(id);
       if (!creation) {
-        if (chats.has(id)) return reply(chats.get(id));
+        if (chats.has(id) || summaries.has(id)) return reply(await getChat(id));
         creation = createChat(id, data.cwd).finally(() => creatingChats.delete(id));
         creatingChats.set(id, creation);
       }
       return reply(await creation, 201);
     }
-    const chat = getChat(data.chat);
+    const chat = await getChat(data.chat);
     if (route === 'api/attach-local') {
       idle(chat);
       if (!Array.isArray(data.paths) || !data.paths.length || data.paths.length > 20) {
