@@ -363,7 +363,10 @@ function connect() {
   if (connecting) return connecting;
   const config = embedded
     ? ['-c', 'sandbox_mode="danger-full-access"', '-c', 'approval_policy="on-request"'] : [];
-  const subprocess = spawn('codex', ['app-server', '--listen', 'stdio://', ...config], { stdio: ['pipe', 'pipe', 'inherit'] });
+  const relay = process.env.CODEX_MOBILE_RELAY;
+  const args = ['app-server', '--listen', 'stdio://', ...config];
+  const subprocess = spawn(relay || 'codex', relay ? ['--relay', 'codex', ...args] : args,
+    { stdio: ['pipe', 'pipe', 'inherit'] });
   child = subprocess;
   subprocess.stdin.on('error', () => {});
   const disconnect = error => {
@@ -398,7 +401,7 @@ function connect() {
     if (interrupted.length) save(interrupted).catch(console.error);
   };
   subprocess.on('error', disconnect);
-  subprocess.on('exit', () => disconnect());
+  subprocess.on('close', () => disconnect());
   createInterface({ input: subprocess.stdout }).on('line', line => {
     try {
       const message = JSON.parse(line);

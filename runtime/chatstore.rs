@@ -1,3 +1,5 @@
+mod relay;
+
 use std::env;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufRead, Write};
@@ -28,7 +30,11 @@ fn write_chat(dir: &Path, id: &str, document: &[u8]) -> io::Result<()> {
 }
 
 fn main() -> io::Result<()> {
-    let dir = env::args_os().nth(1).ok_or(io::ErrorKind::InvalidInput)?;
+    let mut args = env::args_os().skip(1);
+    let dir = args.next().ok_or(io::ErrorKind::InvalidInput)?;
+    if dir == "--relay" {
+        std::process::exit(relay::run(args)?);
+    }
     let dir = Path::new(&dir);
     fs::DirBuilder::new().recursive(true).mode(0o700).create(dir)?;
     let output = io::stdout();

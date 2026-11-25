@@ -79,6 +79,7 @@ internal class UbuntuRuntime private constructor(private val context: Context) {
                 "CODEX_MOBILE_PORT=$port", "CODEX_MOBILE_TOKEN=$token", "CODEX_MOBILE_WORKSPACE=$workspace",
                 "CODEX_MOBILE_INTERNAL_WORKSPACE=/root/Projetos", "CODEX_MOBILE_EMBEDDED=1",
                 "CODEX_MOBILE_CHATSTORE=/opt/codex-mobile/chatstore",
+                "CODEX_MOBILE_RELAY=/opt/codex-mobile/chatstore",
                 "/opt/node/bin/node", "/opt/codex-mobile/server.mjs"
             )
             synchronized(output) { output.clear() }

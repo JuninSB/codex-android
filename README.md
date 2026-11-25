@@ -6,6 +6,12 @@ No primeiro uso, siga **Bem-vindo**, **Permissões**, **Login** e **Usar Codex**
 
 O botão **Uso** mostra porcentagens restantes de cada janela que o Codex relata. A troca de modelo e esforço fica junto ao compositor. O botão **+** abre o menu do explorador integrado. As execuções do Bash aparecem recolhidas e mostram comando, saída e código de saída ao expandir.
 
+## Transporte do Codex
+
+No Ubuntu integrado, o binário Rust supervisiona o Codex App Server e encaminha os quadros JSON-RPC entre o serviço e o Codex. O mesmo binário grava o histórico. O servidor Node.js ainda atende o Android e mantém a lógica de sessões, aprovações e arquivos.
+
+Para testar o transporte localmente, execute `rustc --edition=2021 --test runtime/chatstore.rs -o /tmp/codex-mobile-rust-tests` e rode `/tmp/codex-mobile-rust-tests`.
+
 ## Build
 
 Use JDK 17, Gradle 8.10.2, Android SDK 35 com Build Tools 34.0.0 e as ferramentas `curl`, `tar`, `dpkg-deb`, `sha256sum` e `patchelf` (ou Node.js para aplicar a alteração de dependência ELF). Em um host Linux ARM64, forneça um `aapt2` correspondente à arquitetura. O armazenamento de conversas exige `rustc` com o alvo `aarch64-unknown-linux-gnu`. Em compilação cruzada, use `aarch64-linux-gnu-gcc` ou configure `CODEX_CHATSTORE_LINKER`.
