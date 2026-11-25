@@ -106,17 +106,18 @@ private fun AnnotatedString.Builder.inline(node: Node, artifacts: ArtifactAccess
     }
 }
 
-@Composable internal fun MarkdownBody(source: String) {
+@Composable internal fun MarkdownBody(source: String, selectable: Boolean = true) {
     val root by produceState<Node?>(null, source) {
         value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { parser.parse(source) }
     }
-    SelectionContainer {
+    val body: @Composable () -> Unit = {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             val parsed = root
             if (parsed == null) Text(source.take(600), style = MaterialTheme.typography.bodyLarge)
             else parsed.children().forEach { Block(it) }
         }
     }
+    if (selectable) SelectionContainer { body() } else body()
 }
 
 @Composable private fun Block(node: Node) {

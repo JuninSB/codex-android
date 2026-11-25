@@ -14,7 +14,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -73,8 +72,6 @@ internal fun effortName(name: String?) = when (name) {
     onMessageOpened: () -> Unit
 ) {
     val chat = state.chat
-    var conversationOptions by remember(state.active) { mutableStateOf(false) }
-    if (conversationOptions && chat != null) ConversationActions(chat, vm) { conversationOptions = false }
     val title = chat?.string("title") ?: "Nova conversa"
     val model = chat?.string("model")
     val displayModel = state.catalog.firstOrNull { it.string("model") == model }?.string("displayName") ?: model
@@ -152,10 +149,6 @@ internal fun effortName(name: String?) = when (name) {
                         Symbol(R.drawable.symbol_expand_more, null, color = Ink.Link)
                     }
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                        DropdownMenuItem(text = { Text("Opções da conversa") },
-                            enabled = state.connected && chat != null && !state.busy,
-                            leadingIcon = { Symbol(R.drawable.symbol_ellipsis, null) },
-                            onClick = { menuOpen = false; conversationOptions = true })
                         DropdownMenuItem(text = { Text("Abrir pasta atual") },
                             leadingIcon = { Symbol(R.drawable.symbol_folder_open, null) },
                             onClick = { menuOpen = false; openFolders() })
@@ -343,9 +336,8 @@ internal fun effortName(name: String?) = when (name) {
     val text = message.string("text").orEmpty()
     when (message.string("type")) {
         "user" -> UserMessage(message, text, edit)
-        "agent" -> Column {
-            MarkdownBody(text)
-            if (text.isNotEmpty()) MessageActions(text, outgoing = false)
+        "agent" -> if (text.isNotEmpty()) MessageActions(text, outgoing = false) {
+            MarkdownBody(text, selectable = false)
         }
         "command" -> CommandExecution(message, stop = stop)
         "diff" -> Column {
@@ -390,8 +382,7 @@ internal fun effortName(name: String?) = when (name) {
     val hasMore = preview.length < text.length || overflow
     BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
         val bubbleWidth = minOf(520.dp, maxWidth * .87f)
-        Row(horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.Bottom) {
-            if (text.isNotEmpty() && edit != null) MessageActions(text, outgoing = true) { edit(text) }
+        val bubble: @Composable () -> Unit = {
             Surface(
                 modifier = Modifier.widthIn(max = bubbleWidth),
                 color = MaterialTheme.colorScheme.primaryContainer,
@@ -399,11 +390,9 @@ internal fun effortName(name: String?) = when (name) {
             ) {
                 Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
                     if (text.isNotEmpty()) {
-                        if (expanded) MarkdownBody(text)
-                        else SelectionContainer {
-                            Text(preview, style = MaterialTheme.typography.bodyLarge, maxLines = 8,
-                                overflow = TextOverflow.Ellipsis, onTextLayout = { overflow = it.hasVisualOverflow })
-                        }
+                        if (expanded) MarkdownBody(text, selectable = false)
+                        else Text(preview, style = MaterialTheme.typography.bodyLarge, maxLines = 8,
+                            overflow = TextOverflow.Ellipsis, onTextLayout = { overflow = it.hasVisualOverflow })
                     }
                     message.optJSONArray("files")?.let { files ->
                         for (i in 0 until files.length()) {
@@ -420,6 +409,8 @@ internal fun effortName(name: String?) = when (name) {
                 }
             }
         }
+        if (edit == null && text.isEmpty()) bubble()
+        else MessageActions(text, outgoing = true, edit = edit?.let { action -> { action(text) } }, content = bubble)
     }
 }
 

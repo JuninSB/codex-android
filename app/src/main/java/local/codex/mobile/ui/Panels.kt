@@ -1,6 +1,7 @@
 package local.codex.mobile.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -22,6 +23,7 @@ import local.codex.mobile.core.objects
 import local.codex.mobile.core.string
 import org.json.JSONObject
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable internal fun ConversationList(
     state: MobileState,
     create: () -> Unit,
@@ -78,16 +80,17 @@ import org.json.JSONObject
                     shape = RoundedCornerShape(12.dp),
                     color = if (active) MaterialTheme.colorScheme.primaryContainer else Ink.Surface
                 ) {
-                    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable { select(id) }
+                    val canManage = state.connected && !state.busy && state.chats.any { it.optString("id") == id }
+                    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).combinedClickable(
+                        onClick = { select(id) },
+                        onLongClickLabel = "Opções da conversa",
+                        onLongClick = if (canManage) ({ chatOptions = chat }) else null
+                    )
                         .semantics { selected = active }.padding(horizontal = 10.dp),
                         verticalAlignment = Alignment.CenterVertically) {
                         Text(chat.optString("title"), Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                         if (chat.optBoolean("running")) CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
-                        if (state.connected && !state.busy && state.chats.any { it.optString("id") == id }) {
-                            IconButton(onClick = { chatOptions = chat }) {
-                                Symbol(R.drawable.symbol_ellipsis, "Opções de ${chat.optString("title")}", color = Ink.Muted)
-                            }
-                        }
+
                     }
                 }
             }

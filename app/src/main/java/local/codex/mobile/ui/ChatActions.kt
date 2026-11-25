@@ -2,14 +2,21 @@ package local.codex.mobile.ui
 
 import android.content.Intent
 import android.widget.Toast
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.onLongClick
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.IntOffset
+import kotlin.math.roundToInt
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
@@ -56,8 +63,13 @@ import org.json.JSONObject
 }
 
 @Suppress("DEPRECATION")
-@Composable internal fun MessageActions(text: String, outgoing: Boolean, edit: (() -> Unit)? = null) {
+@Composable internal fun MessageActions(
+    text: String, outgoing: Boolean, edit: (() -> Unit)? = null,
+    content: @Composable () -> Unit
+) {
     var menu by remember { mutableStateOf(false) }
+    var anchor by remember { mutableStateOf(IntOffset.Zero) }
+    val haptics = LocalHapticFeedback.current
     var selection by remember { mutableStateOf(false) }
     val clipboard = LocalClipboardManager.current
     val context = LocalContext.current
@@ -70,22 +82,36 @@ import org.json.JSONObject
         val intent = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text)
         context.startActivity(Intent.createChooser(intent, "Compartilhar mensagem"))
     }
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        if (!outgoing) IconButton(onClick = ::copy) {
-            Symbol(R.drawable.symbol_content_copy, "Copiar resposta", color = Ink.Muted)
-        }
-        Box {
-            IconButton(onClick = { menu = true }) {
-                Symbol(R.drawable.symbol_ellipsis, "Opções da mensagem", color = Ink.Muted)
+    Column {
+        Box(Modifier.pointerInput(haptics) {
+            detectTapGestures(onLongPress = { offset ->
+                anchor = IntOffset(offset.x.roundToInt(), offset.y.roundToInt())
+                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                menu = true
+            })
+        }.semantics {
+            onLongClick("Opções da mensagem") {
+                anchor = IntOffset.Zero
+                menu = true
+                true
             }
-            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                DropdownMenuItem(text = { Text("Copiar") }, onClick = { copy(); menu = false })
-                DropdownMenuItem(text = { Text("Selecionar texto") }, onClick = { selection = true; menu = false })
-                if (edit != null) DropdownMenuItem(text = { Text("Editar para reenviar") }, onClick = { edit(); menu = false })
-                if (text.length < 100000) {
-                    DropdownMenuItem(text = { Text("Compartilhar") }, onClick = { share(); menu = false })
+        }) {
+            content()
+            Box(Modifier.offset { anchor }) {
+                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    if (text.isNotEmpty()) {
+                        DropdownMenuItem(text = { Text("Copiar") }, onClick = { copy(); menu = false })
+                        DropdownMenuItem(text = { Text("Selecionar texto") }, onClick = { selection = true; menu = false })
+                    }
+                    if (edit != null) DropdownMenuItem(text = { Text("Editar para reenviar") }, onClick = { edit(); menu = false })
+                    if (text.isNotEmpty() && text.length < 100000) {
+                        DropdownMenuItem(text = { Text("Compartilhar") }, onClick = { share(); menu = false })
+                    }
                 }
             }
+        }
+        if (!outgoing && text.isNotEmpty()) IconButton(onClick = ::copy) {
+            Symbol(R.drawable.symbol_content_copy, "Copiar resposta", color = Ink.Muted)
         }
     }
     if (selection) Dialog(onDismissRequest = { selection = false },
