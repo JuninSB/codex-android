@@ -1,0 +1,13 @@
+.build/
+dist/
+.gradle/
+build/
+local.properties
+
+.kotlin/
+runtime/target/
+*.apk
+*.p12
+*.jks
+.env
+.env.*

@@ -1,0 +1,19 @@
+# Package manager operations used for ordinary development inside Ubuntu.
+prefix_rule(pattern = [["apt", "apt-get", "/usr/bin/apt", "/usr/bin/apt-get"], ["-y", "--yes", "--assume-yes"], ["update", "install"]], decision = "allow")
+prefix_rule(pattern = [["apt", "apt-get", "/usr/bin/apt", "/usr/bin/apt-get"], ["update", "install"]], decision = "allow")
+prefix_rule(pattern = [["npm", "pnpm", "yarn", "bun"], ["install", "ci", "add"]], decision = "allow")
+prefix_rule(pattern = [["pip", "pip3", "uv", "cargo", "go"], "install"], decision = "allow")
+prefix_rule(pattern = [["python", "python3"], "-m", "pip", "install"], decision = "allow")
+prefix_rule(pattern = ["uv", "tool", "install"], decision = "allow")
+
+# Explicit tool actions that should go through the approval UI.
+prefix_rule(pattern = [["rm", "unlink", "shred", "wipefs", "mkfs", "mkfs.ext4", "dd", "shutdown", "reboot", "/bin/rm", "/usr/bin/rm"]], decision = "prompt", justification = "Esta ação pode apagar dados ou alterar o ambiente.")
+prefix_rule(pattern = [["apt", "apt-get", "/usr/bin/apt", "/usr/bin/apt-get"], ["remove", "purge", "autoremove", "dist-upgrade", "full-upgrade"]], decision = "prompt", justification = "Esta ação altera pacotes já instalados.")
+prefix_rule(pattern = [["apt", "apt-get", "/usr/bin/apt", "/usr/bin/apt-get"], ["-y", "--yes", "--assume-yes"], ["remove", "purge", "autoremove", "dist-upgrade", "full-upgrade"]], decision = "prompt", justification = "Esta ação altera pacotes já instalados.")
+prefix_rule(pattern = [["git", "/usr/bin/git"], ["push", "clean"]], decision = "prompt", justification = "Esta ação publica alterações ou remove arquivos locais.")
+prefix_rule(pattern = [["git", "/usr/bin/git"], "reset", "--hard"], decision = "prompt", justification = "Esta ação pode descartar alterações locais.")
+prefix_rule(pattern = ["gh", "release", ["create", "delete", "upload"]], decision = "prompt", justification = "Esta ação altera uma publicação externa.")
+prefix_rule(pattern = [["npm", "pnpm", "yarn", "bun"], ["publish", "unpublish"]], decision = "prompt", justification = "Esta ação altera um pacote publicado.")
+prefix_rule(pattern = ["kubectl", ["apply", "replace", "delete", "patch", "drain"]], decision = "prompt", justification = "Esta ação altera recursos externos.")
+prefix_rule(pattern = ["terraform", ["apply", "destroy", "import"]], decision = "prompt", justification = "Esta ação altera infraestrutura.")
+prefix_rule(pattern = [["vercel", "flyctl", "netlify"], "deploy"], decision = "prompt", justification = "Esta ação publica um deploy externo.")

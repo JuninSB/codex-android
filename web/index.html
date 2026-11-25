@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Codex Mobile</title>
+<link rel="stylesheet" href="style.css">
+<script defer src="markdown-it.min.js"></script>
+<script defer src="app.js"></script>
+</head>
+<body>
+<aside id="sidebar" aria-label="Conversas">
+  <div class="brand"><span class="mark" aria-hidden="true">›_</span><strong>Codex Mobile</strong><button id="close-menu" class="icon" aria-label="Fechar conversas">×</button></div>
+  <button id="new" class="primary">＋ Nova conversa</button>
+  <label class="search"><input id="search" type="search" placeholder="Buscar conversas" aria-label="Buscar conversas"></label>
+  <nav id="chats" aria-label="Histórico"></nav>
+  <button id="status" class="status"><span class="dot"></span> Status do ambiente <span aria-hidden="true">↗</span></button>
+</aside>
+<button id="scrim" aria-label="Fechar conversas" hidden></button>
+<main>
+  <header>
+    <button id="menu" class="icon" aria-label="Abrir conversas">☰</button>
+    <div class="heading"><strong id="title">Nova conversa</strong><button id="folder" title="Pasta do projeto">▱ <span id="project">Escolher pasta</span></button></div>
+    <button id="model" class="tag">Modelo <span aria-hidden="true">⌄</span></button>
+  </header>
+  <section id="scroll" aria-label="Mensagens">
+    <div id="empty">
+      <span class="hero-mark" aria-hidden="true">›_</span>
+      <h1>O que vamos construir?</h1>
+      <div class="shortcuts"><button id="empty-folder">▱ Escolher pasta</button><button id="empty-files">＋ Anexar arquivos</button></div>
+    </div>
+    <div id="messages"></div>
+  </section>
+  <footer>
+    <div id="approvals"></div>
+    <div id="feedback" role="status"></div>
+    <button id="reconnect" hidden>Reconectar ao Ubuntu</button>
+    <form id="composer">
+      <div id="attachments"></div>
+      <textarea id="prompt" rows="2" placeholder="Escreva para o Codex…" aria-label="Mensagem"></textarea>
+      <div class="toolbar">
+        <button type="button" id="attach" class="icon" aria-label="Anexar arquivos">＋</button>
+        <input id="files" type="file" multiple hidden>
+        <button type="button" id="effort" class="tag">Esforço <span aria-hidden="true">⌄</span></button>
+        <span class="spacer"></span>
+        <button type="submit" id="send" class="send" aria-label="Enviar">↑</button>
+      </div>
+    </form>
+  </footer>
+</main>
+<dialog id="dialog">
+  <div class="dialoghead"><h2 id="dialog-title"></h2><button id="dialog-close" class="icon" aria-label="Fechar">×</button></div>
+  <div id="dialog-body"></div>
+</dialog>
+</body>
+</html>
