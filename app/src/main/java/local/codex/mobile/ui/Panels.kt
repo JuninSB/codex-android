@@ -1,5 +1,6 @@
 package local.codex.mobile.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
@@ -37,30 +38,28 @@ import org.json.JSONObject
     var chatOptions by remember { mutableStateOf<JSONObject?>(null) }
     chatOptions?.let { selected -> ConversationActions(selected, vm) { chatOptions = null } }
     Column(modifier.fillMaxHeight().padding(14.dp)) {
-        Text("Conversas", Modifier.padding(start = 10.dp, top = 12.dp, bottom = 12.dp), style = MaterialTheme.typography.titleLarge)
-        Button(
-            onClick = { query = ""; create() },
-            shape = RoundedCornerShape(14.dp),
-            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
-        ) {
-            Symbol(R.drawable.symbol_add, null)
-            Spacer(Modifier.width(6.dp))
-            Text("Nova conversa")
+        Row(Modifier.fillMaxWidth().padding(start = 6.dp, top = 8.dp, bottom = 14.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Codex Mobile", style = MaterialTheme.typography.titleLarge)
+                Text("Conversas", color = Ink.Muted, style = MaterialTheme.typography.bodyMedium)
+            }
+            ControlButton(R.drawable.symbol_settings, "Configurações", settings)
         }
-        Spacer(Modifier.height(10.dp))
-        TextField(
+        OutlinedTextField(
             value = query, onValueChange = { query = it }, singleLine = true,
             leadingIcon = { Symbol(R.drawable.symbol_search, null, color = Ink.Muted) },
             placeholder = { Text("Buscar conversas") },
-            shape = RoundedCornerShape(14.dp),
-            colors = TextFieldDefaults.colors(
-                focusedContainerColor = Ink.Elevated, unfocusedContainerColor = Ink.Elevated,
-                focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-                unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent
+            shape = RoundedCornerShape(20.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedContainerColor = Ink.Control, unfocusedContainerColor = Ink.Control,
+                focusedBorderColor = Ink.Link, unfocusedBorderColor = Ink.Contour
             ),
             modifier = Modifier.fillMaxWidth()
         )
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(14.dp))
+        HorizontalDivider(color = Ink.Divider)
+        Spacer(Modifier.height(6.dp))
         val local = state.queue.distinctBy { it.chat }.filter { entry ->
             state.chats.none { it.optString("id") == entry.chat }
         }.map { entry ->
@@ -78,7 +77,8 @@ import org.json.JSONObject
                 val active = id == state.active
                 Surface(
                     shape = RoundedCornerShape(12.dp),
-                    color = if (active) MaterialTheme.colorScheme.primaryContainer else Ink.Surface
+                    color = if (active) Ink.Control else Ink.Surface,
+                    border = if (active) BorderStroke(1.dp, Ink.Contour) else null
                 ) {
                     val canManage = state.connected && !state.busy && state.chats.any { it.optString("id") == id }
                     Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).combinedClickable(
@@ -100,11 +100,19 @@ import org.json.JSONObject
             }
         }
         HorizontalDivider(color = Ink.Divider)
-        ListItem(headlineContent = { Text("Configurações") }, supportingContent = {
-            Text(state.account?.string("email") ?: "Conta e ambiente", maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }, leadingContent = { Symbol(R.drawable.symbol_settings, null) },
-            modifier = Modifier.clickable(onClick = settings),
-            colors = ListItemDefaults.colors(containerColor = Ink.Surface))
+        Row(Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            Button(
+                onClick = { query = ""; create() },
+                shape = RoundedCornerShape(22.dp),
+                contentPadding = PaddingValues(horizontal = 16.dp),
+                modifier = Modifier.heightIn(min = 46.dp)
+            ) {
+                Symbol(R.drawable.symbol_add, null, Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Nova conversa")
+            }
+        }
     }
 }
 

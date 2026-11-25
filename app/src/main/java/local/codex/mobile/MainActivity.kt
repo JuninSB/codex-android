@@ -219,8 +219,10 @@ class MainActivity : ComponentActivity() {
                                                 vm::start,
                                                 { modal = "attachments" }, messageTarget, { messageTarget = null })
                                         }
+                                        val drawerWidth = minOf(318.dp, maxWidth * .84f)
                                         if (compact) ModalNavigationDrawer(drawerState = drawer, drawerContent = {
-                                            ModalDrawerSheet(drawerContainerColor = Ink.Surface, modifier = Modifier.widthIn(max = 310.dp)) {
+                                            ModalDrawerSheet(drawerContainerColor = Ink.Surface, modifier = Modifier.width(drawerWidth),
+                                                drawerShape = androidx.compose.foundation.shape.RoundedCornerShape(topEnd = 20.dp, bottomEnd = 20.dp)) {
                                                 ConversationList(state, new, select, settings, vm)
                                             }
                                         }, content = content)

@@ -6,7 +6,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -126,29 +128,46 @@ internal fun effortName(name: String?) = when (name) {
     Column(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxWidth()) {
             Row(
-                Modifier.fillMaxWidth().heightIn(min = 68.dp).padding(horizontal = 10.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 14.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                if (compact) IconButton(onClick = { dismissInput(); openDrawer() }) { Symbol(R.drawable.symbol_menu, "Conversas") }
-                Column(Modifier.weight(1f).padding(start = if (compact) 0.dp else 12.dp)) {
+                if (compact) ControlButton(R.drawable.symbol_menu, "Conversas") { dismissInput(); openDrawer() }
+                Column(Modifier.weight(1f)) {
                     Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
                     Row(
-                        Modifier.heightIn(min = 32.dp).clickable { dismissInput(); openFolders() },
+                        Modifier.heightIn(min = 27.dp).clickable { dismissInput(); openFolders() },
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Symbol(R.drawable.symbol_folder, null, color = Ink.Muted)
-                        Text(projectName(chat?.string("cwd")), color = Ink.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Symbol(R.drawable.symbol_folder, null, Modifier.size(17.dp), Ink.Muted)
+                        Text(projectName(chat?.string("cwd")), color = Ink.Muted, maxLines = 1,
+                            overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium)
                     }
                 }
                 var menuOpen by remember { mutableStateOf(false) }
                 Box {
-                    TextButton(onClick = { dismissInput(); menuOpen = true }) {
-                        Text("Menu", color = Ink.Link)
-                        Symbol(R.drawable.symbol_expand_more, null, color = Ink.Link)
+                    OutlinedButton(onClick = { dismissInput(); menuOpen = true },
+                        border = BorderStroke(1.dp, Ink.Contour),
+                        colors = ButtonDefaults.outlinedButtonColors(containerColor = Ink.Control, contentColor = Ink.Text),
+                        contentPadding = PaddingValues(horizontal = 12.dp)) {
+                        Text("Menu")
+                        Spacer(Modifier.width(3.dp))
+                        Symbol(R.drawable.symbol_expand_more, null, Modifier.size(16.dp), Ink.Muted)
                     }
-                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false },
+                        modifier = Modifier.border(1.dp, Ink.Contour, RoundedCornerShape(14.dp))) {
+                        val effort = chat?.string("effort")?.let(::effortName)
+                        DropdownMenuItem(
+                            text = { Column {
+                                Text("Modelo e esforço")
+                                val details = listOfNotNull(displayModel, effort).joinToString(" · ")
+                                if (details.isNotEmpty()) Text(details, style = MaterialTheme.typography.bodySmall, color = Ink.Muted)
+                            } },
+                            enabled = !state.running && !state.busy,
+                            leadingIcon = { Symbol(R.drawable.symbol_tune, null) },
+                            onClick = { menuOpen = false; configure() })
+                        HorizontalDivider(color = Ink.Divider)
                         DropdownMenuItem(text = { Text("Abrir pasta atual") },
                             leadingIcon = { Symbol(R.drawable.symbol_folder_open, null) },
                             onClick = { menuOpen = false; openFolders() })
@@ -208,6 +227,18 @@ internal fun effortName(name: String?) = when (name) {
                         }
                     }
                 }
+            } else if (state.syncingChat && state.active != null) {
+                Column(Modifier.align(Alignment.TopCenter).widthIn(max = 800.dp).fillMaxWidth().padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Box(Modifier.align(Alignment.End).fillMaxWidth(.62f).height(54.dp)
+                        .background(Ink.Surface, RoundedCornerShape(16.dp)))
+                    Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                        repeat(3) { line ->
+                            Box(Modifier.fillMaxWidth(if (line == 2) .58f else .87f).height(9.dp)
+                                .background(Ink.Surface, RoundedCornerShape(6.dp)))
+                        }
+                    }
+                }
             }
         }
         Column(Modifier.align(Alignment.CenterHorizontally).widthIn(max = 800.dp).fillMaxWidth().padding(horizontal = 12.dp)) {
@@ -232,7 +263,7 @@ internal fun effortName(name: String?) = when (name) {
                 MiniShell(activeCommand, vm::stopTool)
             }
             CredentialSuggestions(state, vm::prompt)
-            Composer(state, vm, ready, { dismissInput(); openAttachments() }, { dismissInput(); configure() }, displayModel) {
+            Composer(state, vm, ready, { dismissInput(); openAttachments() }) {
                 dismissInput()
                 pinned = true
                 vm.send()
@@ -246,13 +277,12 @@ internal fun effortName(name: String?) = when (name) {
     vm: MobileViewModel,
     ready: Boolean,
     chooseFiles: () -> Unit,
-    configure: () -> Unit,
-    model: String?,
     submit: () -> Unit
 ) {
     Surface(
-        Modifier.fillMaxWidth().padding(bottom = 10.dp),
-        color = Ink.Surface, shape = RoundedCornerShape(26.dp)
+        Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 10.dp),
+        color = Ink.Control, shape = RoundedCornerShape(25.dp),
+        border = BorderStroke(1.dp, Ink.Contour)
     ) {
         Column(Modifier.padding(horizontal = 8.dp, vertical = 5.dp)) {
             for (attachment in state.attachments) {
@@ -262,27 +292,18 @@ internal fun effortName(name: String?) = when (name) {
                     IconButton(onClick = { vm.remove(attachment) }) { Symbol(R.drawable.symbol_close, "Remover anexo") }
                 }
             }
-            ComposerInput(state.prompt, vm::prompt)
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = chooseFiles, enabled = ready && !state.busy) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
+                IconButton(onClick = chooseFiles, enabled = ready && !state.busy, modifier = Modifier.size(42.dp)) {
                     Symbol(R.drawable.symbol_add, "Anexar arquivos")
                 }
-                Spacer(Modifier.weight(1f))
-                val effort = state.chat?.string("effort")?.let(::effortName)
-                TextButton(onClick = configure, enabled = !state.running && !state.busy) {
-                    Symbol(R.drawable.symbol_tune, "Configurar modelo e esforço", color = Ink.Muted)
-                    Spacer(Modifier.width(7.dp))
-                    Text(listOfNotNull(model, effort).joinToString(" · ").ifBlank { "Configurar" },
-                        modifier = Modifier.widthIn(max = 178.dp), maxLines = 1,
-                        overflow = TextOverflow.Ellipsis, color = Ink.Link)
-                }
+                ComposerInput(state.prompt, vm::prompt, Modifier.weight(1f))
                 val hasDraft = state.prompt.isNotBlank() || state.attachments.isNotEmpty()
                 val stop = state.running && !hasDraft
                 val enabled = hasDraft || (ready && stop && !state.busy)
                 val fill by animateColorAsState(if (enabled) Ink.Accent else Ink.Elevated, label = "send")
                 FilledIconButton(
                     onClick = submit,
-                    enabled = enabled,
+                    enabled = enabled, modifier = Modifier.size(42.dp),
                     colors = IconButtonDefaults.filledIconButtonColors(containerColor = fill, disabledContainerColor = fill)
                 ) {
                     Symbol(if (stop) R.drawable.symbol_stop else R.drawable.symbol_arrow_upward,
@@ -294,12 +315,12 @@ internal fun effortName(name: String?) = when (name) {
     }
 }
 
-@Composable private fun ComposerInput(value: String, onChange: (String) -> Unit) {
+@Composable private fun ComposerInput(value: String, onChange: (String) -> Unit, modifier: Modifier = Modifier) {
     val requester = remember { FocusRequester() }
     var editing by remember { mutableStateOf(false) }
     var acquired by remember { mutableStateOf(false) }
     val keyboard = LocalSoftwareKeyboardController.current
-    val field = Modifier.fillMaxWidth().heightIn(min = 44.dp, max = 132.dp)
+    val field = modifier.heightIn(min = 42.dp, max = 132.dp)
     val placeholder = "Escreva para o Codex…"
     if (editing) {
         BasicTextField(
@@ -310,7 +331,7 @@ internal fun effortName(name: String?) = when (name) {
                     acquired = false
                     editing = false
                 }
-            }.padding(horizontal = 10.dp, vertical = 7.dp),
+            }.padding(horizontal = 6.dp, vertical = 10.dp),
             textStyle = MaterialTheme.typography.bodyLarge.copy(color = Ink.Text),
             cursorBrush = SolidColor(Ink.Link),
             maxLines = 5,
@@ -326,7 +347,7 @@ internal fun effortName(name: String?) = when (name) {
     } else {
         Text(value.ifEmpty { placeholder },
             field.clickable(onClickLabel = "Editar mensagem") { editing = true }
-                .padding(horizontal = 10.dp, vertical = 7.dp),
+                .padding(horizontal = 6.dp, vertical = 10.dp),
             color = if (value.isEmpty()) Ink.Muted else Ink.Text, style = MaterialTheme.typography.bodyLarge,
             maxLines = 5, overflow = TextOverflow.Ellipsis)
     }

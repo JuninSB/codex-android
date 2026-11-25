@@ -2,7 +2,9 @@ package local.codex.mobile.ui
 
 import android.content.Intent
 import android.widget.Toast
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -98,7 +100,8 @@ import org.json.JSONObject
         }) {
             content()
             Box(Modifier.offset { anchor }) {
-                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                DropdownMenu(expanded = menu, onDismissRequest = { menu = false },
+                    modifier = Modifier.border(1.dp, Ink.Contour, RoundedCornerShape(14.dp))) {
                     if (text.isNotEmpty()) {
                         DropdownMenuItem(text = { Text("Copiar") }, onClick = { copy(); menu = false })
                         DropdownMenuItem(text = { Text("Selecionar texto") }, onClick = { selection = true; menu = false })
