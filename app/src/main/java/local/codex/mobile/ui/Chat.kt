@@ -147,13 +147,9 @@ internal fun effortName(name: String?) = when (name) {
                 }
                 var menuOpen by remember { mutableStateOf(false) }
                 Box {
-                    OutlinedButton(onClick = { dismissInput(); menuOpen = true },
-                        border = BorderStroke(1.dp, Ink.Contour),
-                        colors = ButtonDefaults.outlinedButtonColors(containerColor = Ink.Control, contentColor = Ink.Text),
-                        contentPadding = PaddingValues(horizontal = 12.dp)) {
-                        Text("Menu")
-                        Spacer(Modifier.width(3.dp))
-                        Symbol(R.drawable.symbol_expand_more, null, Modifier.size(16.dp), Ink.Muted)
+                    ControlButton(R.drawable.symbol_ellipsis, "Opções") {
+                        dismissInput()
+                        menuOpen = true
                     }
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false },
                         modifier = Modifier.border(1.dp, Ink.Contour, RoundedCornerShape(14.dp))) {

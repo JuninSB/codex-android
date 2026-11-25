@@ -35,6 +35,7 @@ import org.json.JSONObject
 ) {
     var query by rememberSaveable { mutableStateOf("") }
     var archived by rememberSaveable { mutableStateOf(false) }
+    var searching by rememberSaveable { mutableStateOf(false) }
     var chatOptions by remember { mutableStateOf<JSONObject?>(null) }
     chatOptions?.let { selected -> ConversationActions(selected, vm) { chatOptions = null } }
     Column(modifier.fillMaxHeight().padding(14.dp)) {
@@ -44,9 +45,9 @@ import org.json.JSONObject
                 Text("Codex Mobile", style = MaterialTheme.typography.titleLarge)
                 Text("Conversas", color = Ink.Muted, style = MaterialTheme.typography.bodyMedium)
             }
-            ControlButton(R.drawable.symbol_settings, "Configurações", settings)
+            ControlButton(R.drawable.symbol_search, "Buscar conversas") { searching = !searching; query = "" }
         }
-        OutlinedTextField(
+        if (searching) OutlinedTextField(
             value = query, onValueChange = { query = it }, singleLine = true,
             leadingIcon = { Symbol(R.drawable.symbol_search, null, color = Ink.Muted) },
             placeholder = { Text("Buscar conversas") },
@@ -112,6 +113,8 @@ import org.json.JSONObject
                 Spacer(Modifier.width(6.dp))
                 Text("Nova conversa")
             }
+            Spacer(Modifier.weight(1f))
+            ControlButton(R.drawable.symbol_settings, "Configurações", settings)
         }
     }
 }
@@ -401,12 +404,18 @@ import org.json.JSONObject
     }
 }
 
-@Composable internal fun Settings(state: MobileState, back: () -> Unit, usage: () -> Unit, storage: () -> Unit, logout: () -> Unit, connectTermux: () -> Unit, connectShizuku: () -> Unit) {
+@Composable internal fun Settings(state: MobileState, back: () -> Unit, usage: () -> Unit, storage: () -> Unit, logout: () -> Unit, connectTermux: () -> Unit, connectShizuku: () -> Unit, background: Boolean, setBackground: (Boolean) -> Unit) {
     var confirm by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize()) {
         PageTitle("Configurações", back)
         val email = state.account?.string("email")
         if (email != null) SettingsRow(email, state.account.string("planType"), R.drawable.symbol_account_circle)
+        ListItem(
+            headlineContent = { Text("Executar em segundo plano") },
+            supportingContent = { Text("Mantém o ambiente ativo com uma notificação.") },
+            trailingContent = { Switch(checked = background, onCheckedChange = setBackground) },
+            colors = ListItemDefaults.colors(containerColor = Ink.Background)
+        )
         SettingsRow("Uso e ambiente", "Limites, modelo e Ubuntu", R.drawable.symbol_terminal, usage)
         SettingsRow("Pastas do Android", "Acesso ao armazenamento compartilhado", R.drawable.symbol_folder_open, storage)
         SettingsRow("Conectar Termux", "Ferramenta opcional termux_shell", R.drawable.symbol_terminal, connectTermux)

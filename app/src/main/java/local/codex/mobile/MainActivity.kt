@@ -100,6 +100,30 @@ class MainActivity : ComponentActivity() {
                     Shizuku.addRequestPermissionResultListener(listener)
                     onDispose { Shizuku.removeRequestPermissionResultListener(listener) }
                 }
+                var background by remember { mutableStateOf(prefs.getBoolean("background", false)) }
+                val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+                    if (!granted) vm.report("Ative notificações do Codex Mobile para acompanhar o serviço.")
+                }
+                val setBackground: (Boolean) -> Unit = { enabled ->
+                    background = enabled
+                    prefs.edit().putBoolean("background", enabled).apply()
+                    val service = Intent(this, local.codex.mobile.core.BackgroundService::class.java)
+                    if (enabled) {
+                        if (android.os.Build.VERSION.SDK_INT >= 33 &&
+                            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                            notificationPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                        }
+                        runCatching { androidx.core.content.ContextCompat.startForegroundService(this, service) }
+                            .onFailure { background = false; prefs.edit().putBoolean("background", false).apply()
+                                vm.report("Não foi possível iniciar o serviço em segundo plano.") }
+                    } else stopService(service)
+                }
+                LaunchedEffect(background) {
+                    if (background) runCatching {
+                        androidx.core.content.ContextCompat.startForegroundService(this@MainActivity,
+                            Intent(this@MainActivity, local.codex.mobile.core.BackgroundService::class.java))
+                    }.onFailure { vm.report("Não foi possível iniciar o serviço em segundo plano.") }
+                }
                 val connectShizuku: () -> Unit = {
                     runCatching {
                         if (!Shizuku.pingBinder()) {
@@ -241,7 +265,7 @@ class MainActivity : ComponentActivity() {
                                         back, askGrant, entry.arguments?.getString("file"))
                                 }
                                 composable("settings") {
-                                    Settings(state, back, { vm.usage(); nav.navigate("usage") }, askGrant, vm::logout, connectTermux, connectShizuku)
+                                    Settings(state, back, { vm.usage(); nav.navigate("usage") }, askGrant, vm::logout, connectTermux, connectShizuku, background, setBackground)
                                 }
                                 composable("usage") { Usage(state, back) }
                                 composable("credentials?alias={alias}", arguments = listOf(
