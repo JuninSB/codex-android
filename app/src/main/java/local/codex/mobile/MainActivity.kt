@@ -246,7 +246,7 @@ class MainActivity : ComponentActivity() {
                                         val drawerWidth = minOf(318.dp, maxWidth * .84f)
                                         if (compact) ModalNavigationDrawer(drawerState = drawer, drawerContent = {
                                             ModalDrawerSheet(drawerContainerColor = Ink.Surface, modifier = Modifier.width(drawerWidth),
-                                                drawerShape = androidx.compose.foundation.shape.RectangleShape) {
+                                                drawerShape = androidx.compose.ui.graphics.RectangleShape) {
                                                 ConversationList(state, new, select, settings, vm)
                                             }
                                         }, content = content)
