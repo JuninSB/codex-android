@@ -83,7 +83,46 @@ class DeviceControlService : AccessibilityService() {
             else -> null
         })
         when (actionName) {
-            "screenshot" -> screenshot()
+            "screenshot", "watch_region" -> {
+                val session = checkNotNull(DeviceControlSession.chat)
+                fun authorized() = check(DeviceControlSession.chat == session && instance === this@DeviceControlService)
+                val threshold = action.optInt("changedPixels", 1)
+                val watching = actionName == "watch_region"
+                var baseline: IntArray? = null
+                val deadline = android.os.SystemClock.elapsedRealtime() + action.optLong("timeoutMs", 30000).coerceIn(1000, 90000)
+                if (watching) {
+                    require(action.has("width") && action.has("height"))
+                    do {
+                        authorized()
+                        val pixels = mutableListOf<IntArray>()
+                        screenshot(action, pixels)
+                        val current = pixels.single()
+                        val first = baseline
+                        require(threshold in 1..current.size)
+                        if (first == null) baseline = current
+                        else if (current.indices.count { current[it] != first[it] } >= threshold) break
+                        kotlinx.coroutines.delay(750)
+                        check(android.os.SystemClock.elapsedRealtime() < deadline) { "Tempo de observação esgotado." }
+                    } while (true)
+                    if (!action.optBoolean("capture")) return@withContext obj("exit" to 0, "stdout" to "A região mudou. Continue com a ação solicitada.")
+                    kotlinx.coroutines.delay(750)
+                }
+                kotlinx.coroutines.delay(action.optLong("delayMs").coerceIn(0, 20000))
+                authorized()
+                screenshot(action)
+            }
+            "insert_text" -> {
+                val node = findFocus(android.view.accessibility.AccessibilityNodeInfo.FOCUS_INPUT)
+                    ?: error("Toque primeiro no campo de texto.")
+                check(node.isEditable && !node.isPassword) { "Campo incompatível com inserção de texto." }
+                val previous = node.text?.toString().orEmpty()
+                val start = node.textSelectionStart.takeIf { it in 0..previous.length } ?: previous.length
+                val end = node.textSelectionEnd.takeIf { it in 0..previous.length } ?: start
+                val value = previous.replaceRange(minOf(start,end), maxOf(start,end), action.getString("text"))
+                val args = android.os.Bundle().apply { putCharSequence(android.view.accessibility.AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, value) }
+                check(node.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_TEXT, args)) { "O campo recusou o texto." }
+                obj("exit" to 0, "stdout" to "Texto inserido.")
+            }
             "speak" -> {
                 val message = action.optString("message").trim()
                 require(message.isNotEmpty() && message.length <= 120 && message.none { it.isISOControl() }) { "Informe uma mensagem curta para o indicador." }
@@ -123,14 +162,24 @@ class DeviceControlService : AccessibilityService() {
                 val packageName = action.getString("package")
                 require(packageName.matches(Regex("[A-Za-z0-9_]+(\\.[A-Za-z0-9_]+)+"))) { "Nome de pacote inválido." }
                 val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setPackage(packageName).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                startActivity(intent)
+                try {
+                    startActivity(intent)
+                } catch (_: android.content.ActivityNotFoundException) {
+                    error("A abertura nativa de $packageName não encontrou uma atividade. " +
+                        "Se o Shizuku estiver conectado, use adb_shell para resolver a atividade de launcher desse pacote " +
+                        "e abra o componente encontrado com am start -n.")
+                } catch (_: SecurityException) {
+                    error("O Android recusou a abertura nativa de $packageName. " +
+                        "Se o Shizuku estiver conectado, use adb_shell para verificar a atividade de launcher exportada " +
+                        "e tente abrir o componente encontrado com am start -n.")
+                }
                 obj("exit" to 0, "stdout" to "Solicitada abertura de $packageName.")
             }
             else -> error("Ação desconhecida.")
         }
     }
 
-    private suspend fun screenshot(): JSONObject {
+    private suspend fun screenshot(action: JSONObject, samples: MutableList<IntArray>? = null): JSONObject {
         check(Build.VERSION.SDK_INT >= 30) { "Captura pela acessibilidade requer Android 11 ou superior." }
         val done = CompletableDeferred<JSONObject>()
         takeScreenshot(Display.DEFAULT_DISPLAY, mainExecutor, object : TakeScreenshotCallback {
@@ -139,8 +188,29 @@ class DeviceControlService : AccessibilityService() {
                     val buffer = result.hardwareBuffer
                     val hardware = Bitmap.wrapHardwareBuffer(buffer, result.colorSpace ?: ColorSpace.get(ColorSpace.Named.SRGB))
                         ?: error("O Android não retornou uma imagem.")
-                    val bitmap = hardware.copy(Bitmap.Config.ARGB_8888, false)
+                    val full = hardware.copy(Bitmap.Config.ARGB_8888, false)
                     buffer.close()
+                    hardware.recycle()
+                    val x = action.optInt("x")
+                    val y = action.optInt("y")
+                    val w = action.optInt("width", full.width - x)
+                    val h = action.optInt("height", full.height - y)
+                    require(x >= 0 && y >= 0 && w in 1..(full.width-x) && h in 1..(full.height-y)) { "Região fora da tela." }
+                    if (samples != null) {
+                        val pixels = IntArray(w*h)
+                        full.getPixels(pixels,0,w,x,y,w,h)
+                        full.recycle()
+                        samples.add(pixels)
+                        done.complete(obj("exit" to 0))
+                        return
+                    }
+                    val crop = Bitmap.createBitmap(full,x,y,w,h)
+                    if (crop !== full) full.recycle()
+                    val ow = action.optInt("outputWidth", w)
+                    val oh = action.optInt("outputHeight", h)
+                    require(ow in 1..w && oh in 1..h)
+                    val bitmap = Bitmap.createScaledBitmap(crop,ow,oh,true)
+                    if (bitmap !== crop) crop.recycle()
                     val out = ByteArrayOutputStream()
                     for (quality in listOf(65, 50, 35)) {
                         out.reset()
@@ -150,9 +220,8 @@ class DeviceControlService : AccessibilityService() {
                     bitmap.recycle()
                     val bytes = out.toByteArray()
                     require(bytes.size <= 1_350_000) { "A captura excedeu o tamanho permitido." }
-                    done.complete(obj("exit" to 0, "stdout" to "Tela atual: ${hardware.width} x ${hardware.height} pixels.",
+                    done.complete(obj("exit" to 0, "stdout" to "Origem ($x,$y), região ${w}x$h, imagem ${ow}x$oh.",
                         "image" to ("data:image/jpeg;base64," + Base64.encodeToString(bytes, Base64.NO_WRAP))))
-                    hardware.recycle()
                 } catch (e: Exception) { done.complete(obj("error" to (e.message ?: "Falha na captura."))) }
             }
             override fun onFailure(errorCode: Int) { done.complete(obj("error" to "Falha ao capturar a tela (código $errorCode).")) }

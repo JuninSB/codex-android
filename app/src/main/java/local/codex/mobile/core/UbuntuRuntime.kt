@@ -159,7 +159,10 @@ internal class UbuntuRuntime private constructor(private val context: Context) {
             "codex-mobile.rules" to File(root, "root/.codex/rules/codex-mobile.rules"),
             "chatstore.bin" to File(root, "opt/codex-mobile/chatstore"),
             "server.mjs" to File(root, "opt/codex-mobile/server.mjs")
-        )
+        ) + if (BuildConfig.DEVICE_CONTROL) listOf(
+            "skills/android-device-control/SKILL.md" to
+                File(root, "root/.codex/skills/android-device-control/SKILL.md")
+        ) else emptyList()
         if (versionFile.isFile && versionFile.readText() == version &&
             targets.all { (asset, file) -> file.length() > 0 && (asset != "chatstore.bin" || file.canExecute()) }) return
         for ((asset, destination) in targets) {

@@ -23,12 +23,14 @@ internal class DeviceControlIndicator(context: Context) : View(context) {
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        val stroke = dp(5f)
+        val stroke = dp(3f)
         paint.style = Paint.Style.STROKE
         paint.strokeWidth = stroke
-        paint.shader = LinearGradient(0f, 0f, width.toFloat(), height.toFloat(),
+        val phase = android.os.SystemClock.uptimeMillis() % 6000L / 6000f
+        paint.shader = LinearGradient(width * phase, height * phase, width * (1f + phase), height * (1f + phase),
             intArrayOf(0xff7ab7ff.toInt(), 0xff3466e8.toInt(), 0xff172c76.toInt(), 0xff8cc7ff.toInt()),
-            null, Shader.TileMode.CLAMP)
+            null, Shader.TileMode.REPEAT)
+        postInvalidateDelayed(50)
         canvas.drawRoundRect(stroke / 2, stroke / 2, width - stroke / 2, height - stroke / 2, dp(22f), dp(22f), paint)
         paint.shader = null
         paint.style = Paint.Style.FILL
