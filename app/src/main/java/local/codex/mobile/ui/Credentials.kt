@@ -129,7 +129,9 @@ import local.codex.mobile.core.string
         title = { Text("Autorizar +$alias") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("Aprovar uma solicitação HTTPS com esta credencial?")
+                val target = request.optJSONObject("params")?.string("command").orEmpty()
+                Text(if (target.startsWith("file:")) "Criar um arquivo com o token dentro da pasta do projeto?"
+                    else "Aprovar uma solicitação HTTPS com esta credencial?")
                 request.optJSONObject("params")?.string("command")?.let { Text(it, style = mono) }
                 PasswordField(password, { password = it }, "Senha do cofre")
                 state.vaultError?.let { Text(it, color = MaterialTheme.colorScheme.error) }

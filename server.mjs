@@ -17,6 +17,7 @@ const internalWorkspace = process.env.CODEX_MOBILE_INTERNAL_WORKSPACE || workspa
 const port = Number(process.env.CODEX_MOBILE_PORT || 41739);
 await fs.mkdir(stateDir, { recursive: true, mode: 0o700 });
 const embedded = process.env.CODEX_MOBILE_EMBEDDED === '1';
+const deviceControlEnabled = embedded && process.env.CODEX_MOBILE_DEVICE_CONTROL !== '0';
 const token = (process.env.CODEX_MOBILE_TOKEN || await fs.readFile(path.join(stateDir, 'token'), 'utf8')).trim();
 delete process.env.CODEX_MOBILE_TOKEN;
 if (!/^[a-f\d]{64}$/.test(token)) throw new Error('Token local inválido.');
@@ -127,16 +128,20 @@ const loaded = new Set();
 const approvals = new Map();
 const buffer = new Map();
 const androidTools = embedded ? [
-  { type: 'function', name: 'credential_shell', description: 'Authenticate one HTTPS GET request using a named credential. Set command to the complete HTTPS URL, not a shell command. The user approves the destination. Returns HTTP status only. Use TOKEN for Bearer or LOGIN for Basic.', inputSchema: {
+  { type: 'function', name: 'credential_shell', description: 'Use a named credential. For an HTTPS GET, set command to the HTTPS URL. When the user explicitly asks to save the secret in a file, set command to file: followed by a relative path inside the project, for example file:token.txt. The app requests password approval for the exact destination and creates a new file without overwriting. Never ask to reveal the secret in chat.', inputSchema: {
     type: 'object', properties: { credential: { type: 'string' }, command: { type: 'string' } }, required: ['credential','command'], additionalProperties: false
   } },
   { type: 'function', name: 'termux_shell', description: 'Run Bash in the separately installed Android Termux app only when explicitly needed. Ubuntu is the default for ordinary work. In YOLO mode, approved read-only diagnostics run directly; other commands require confirmation.', inputSchema: {
     type: 'object', properties: { command: { type: 'string' }, cwd: { type: 'string', description: 'Optional absolute Termux working directory; defaults to its home.' } }, required: ['command'], additionalProperties: false
   } },
+  { type: 'function', name: 'device_control', description: 'Control the Android screen only after the user authorizes this chat. Request screenshot to see the current screen; use tap, long_press, swipe, back, home or open_app to interact. Coordinates use screenshot pixels. Take a fresh screenshot after actions.', inputSchema: {
+    type: 'object', properties: { action: { type: 'string', enum: ['screenshot','tap','long_press','swipe','back','home','open_app'] }, x: { type: 'integer' }, y: { type: 'integer' }, x2: { type: 'integer' }, y2: { type: 'integer' }, duration: { type: 'integer' }, package: { type: 'string' } }, required: ['action'], additionalProperties: false
+  } },
   { type: 'function', name: 'adb_shell', description: 'Run a command in Android adb shell through Shizuku (shell UID 2000). Use the shell command itself, without the adb shell prefix. In YOLO mode, approved read-only diagnostics run directly; other commands require confirmation.', inputSchema: {
     type: 'object', properties: { command: { type: 'string' } }, required: ['command'], additionalProperties: false
   } }
 ] : [];
+if (embedded && !deviceControlEnabled) androidTools.splice(androidTools.findIndex(tool => tool.name === 'device_control'), 1);
 const bridgeCalls = new Map();
 const yoloTurns = new Set();
 const deletionConsent = new Map();
@@ -181,8 +186,8 @@ function routineAndroidQuery(command, cwd, target) {
   return allowed ? queries.join(' && ') : null;
 }
 
-function dynamicResult(id, success, text) {
-  send({ id, result: { success, contentItems: [{ type: 'inputText', text }] } });
+function dynamicResult(id, success, text, image) {
+  send({ id, result: { success, contentItems: [{ type: 'inputText', text }, ...(image ? [{type: 'inputImage', imageUrl: image}] : [])] } });
 }
 
 function finishBridge(key, result) {
@@ -200,7 +205,8 @@ function finishBridge(key, result) {
     exit: result.exit, output: output.slice(-24000), truncated: output.length > 24000 || result.truncated === true
   });
   dynamicResult(request, result.exit === 0 && !result.error,
-    [result.exit == null ? null : 'Código de saída: ' + result.exit, output || '(sem saída)'].filter(Boolean).join('\n').slice(0, 105000));
+    [result.exit == null ? null : 'Código de saída: ' + result.exit, output || '(sem saída)'].filter(Boolean).join('\n').slice(0, 105000),
+    call.target === 'Controle do dispositivo' && typeof result.image === 'string' && /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(result.image) ? result.image : null);
   touch();
 }
 let login = null;
@@ -254,8 +260,13 @@ function notify({ method, params: p = {}, id }) {
   if (id !== undefined) {
     if (method === 'item/tool/call') {
       const credentialCall = p.tool === 'credential_shell';
-      const target = credentialCall ? 'Ubuntu · Credencial' : p.tool === 'adb_shell' ? 'ADB shell' : p.tool === 'termux_shell' ? 'Termux' : null;
-      const { command, cwd, credential } = p.arguments || {};
+      const deviceCall = p.tool === 'device_control' || (p.tool === 'adb_shell' &&
+        typeof p.arguments?.command === 'string' && p.arguments.command.startsWith('codex-device:'));
+      if (deviceCall && !deviceControlEnabled) { dynamicResult(id, false, 'Controle do dispositivo não está disponível nesta edição.'); return; }
+      const target = deviceCall ? 'Controle do dispositivo' : credentialCall ? 'Ubuntu · Credencial' : p.tool === 'adb_shell' ? 'ADB shell' : p.tool === 'termux_shell' ? 'Termux' : null;
+      const { cwd, credential } = p.arguments || {};
+      const command = p.tool === 'device_control' ? JSON.stringify(p.arguments || {}) :
+        deviceCall ? p.arguments.command.slice('codex-device:'.length) : p.arguments?.command;
       const alias = typeof credential === 'string' ? credential.trim().replace(/^\+/, '').toLowerCase() : '';
       if (!chat?.running || !target || !androidTools.length || typeof command !== 'string' ||
         !command.trim() || command.length > 12000 || command.includes('\0') ||
@@ -265,7 +276,16 @@ function notify({ method, params: p = {}, id }) {
         return;
       }
       let credentialUrl;
-      if (credentialCall) {
+      let credentialFile;
+      if (credentialCall && command.startsWith('file:')) {
+        const relative = command.slice(5);
+        if (!relative || path.isAbsolute(relative) || relative.includes('\0') ||
+            relative.split('/').some(part => !part || part === '.' || part === '..')) {
+          dynamicResult(id, false, 'Use file: com um caminho relativo válido dentro do projeto.');
+          return;
+        }
+        credentialFile = relative;
+      } else if (credentialCall) {
         try {
           credentialUrl = new URL(command);
           if (credentialUrl.protocol !== 'https:' || credentialUrl.username || credentialUrl.password ||
@@ -278,8 +298,8 @@ function notify({ method, params: p = {}, id }) {
       const key = 'android-' + randomUUID();
       const timer = setTimeout(() => finishBridge(key, { error: 'Execução Android expirou.' }), 150000);
       timer.unref();
-      const routine = !credentialCall && yoloTurns.has(chat.id) ? routineAndroidQuery(command, cwd, target) : null;
-      bridgeCalls.set(key, { request: id, chat, target, command: routine ?? command, cwd, timer, alias: credentialCall ? alias : null, credentialUrl });
+      const routine = !credentialCall && !deviceCall && yoloTurns.has(chat.id) ? routineAndroidQuery(command, cwd, target) : null;
+      bridgeCalls.set(key, { request: id, chat, target, command: routine ?? command, cwd, timer, alias: credentialCall ? alias : null, credentialUrl, credentialFile });
       const automatic = routine !== null;
       approvals.set(key, { id: key, chatId: chat.id, android: !credentialCall, credential: credentialCall, automatic,
         params: { command, cwd, target, ...(credentialCall ? { name: alias } : {}) } });
@@ -562,6 +582,32 @@ http.createServer(async (request, response) => {
     }
     if (request.method === 'GET') {
       if (route === 'api/health') return reply({});
+      if (route === 'api/search') {
+        const query = (url.searchParams.get('q') || '').trim().slice(0, 200).toLocaleLowerCase();
+        if (!query) return reply({ results: [] });
+        const results = [];
+        for (const row of [...summaries.values()].reverse().sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))) {
+          if (row.archived || row.deleted) continue;
+          let chat = chats.get(row.id);
+          if (!chat && segmentedStore) {
+            try { chat = JSON.parse(await fs.readFile(path.join(chatDirectory, row.id + '.json'), 'utf8')); }
+            catch { continue; }
+          }
+          const title = row.title || 'Nova conversa';
+          let snippet = '';
+          for (const message of chat?.messages || []) {
+            if (typeof message.text !== 'string') continue;
+            const index = message.text.toLocaleLowerCase().indexOf(query);
+            if (index >= 0) {
+              snippet = message.text.slice(Math.max(0, index - 50), index + query.length + 100).replace(/\s+/g, ' ');
+              break;
+            }
+          }
+          if (snippet || title.toLocaleLowerCase().includes(query)) results.push({ id: row.id, title, snippet });
+          if (results.length >= 100) break;
+        }
+        return reply({ results });
+      }
       if (route === 'api/state') {
         const id = url.searchParams.get('chat');
         const cached = chats.has(id);
@@ -830,6 +876,20 @@ http.createServer(async (request, response) => {
       if (!request?.credential || !call || call.chat !== chat || credential?.name !== call.alias) {
         throw new Error('Solicitação de credencial inválida ou expirada.');
       }
+      if (call.credentialFile) {
+        if (credential.type !== 'TOKEN' || typeof credential.secret !== 'string' || !credential.secret ||
+            credential.secret.length > 20000) throw new Error('A exportação aceita uma credencial do tipo Token.');
+        const root = await directory(chat.cwd);
+        const parent = await directory(path.join(root, path.dirname(call.credentialFile)));
+        if (parent !== root && !parent.startsWith(root + '/')) throw new Error('Destino fora da pasta do projeto.');
+        const file = path.join(parent, path.basename(call.credentialFile));
+        const handle = await fs.open(file, 'wx', 0o600);
+        try { await handle.writeFile(credential.secret, 'utf8'); }
+        catch (error) { await handle.close(); await fs.unlink(file).catch(() => {}); throw error; }
+        await handle.close();
+        finishBridge(key, { exit: 0, stdout: 'Arquivo criado: ' + call.credentialFile });
+        return reply({});
+      }
       const { type, secret, username } = credential;
       const field = (value, max) => typeof value === 'string' && value.length > 0 && value.length <= max && !/[\x00-\x1f\x7f]/.test(value);
       if (!['TOKEN', 'LOGIN'].includes(type) || !field(secret, 20000) ||
@@ -956,7 +1016,8 @@ http.createServer(async (request, response) => {
             'When referencing a user message, use [mensagem](message:N) with its 1-based user message number.',
             'Use Markdown links to show existing paths, e.g. [arquivo](./relatorio.md) and [pasta](./Anexos/).',
             'Use Markdown images for local images, e.g. ![prévia](./figura.png). Percent-encode spaces in paths.',
-            'Reference a credential by known alias only, e.g. [+alias](credential:alias). Authorization is a separate app action.',
+            ...(deviceControlEnabled ? ['Use device_control to inspect or interact with the Android screen when requested. If device_control is unavailable in an older thread, use adb_shell with command codex-device: followed by JSON, for example codex-device:{\"action\":\"screenshot\"}. Supported actions are screenshot, tap, long_press, swipe, back, home and open_app. Gestures use integer x, y, optional x2, y2 and duration; open_app uses package. A password-protected session is required. Ask for explicit confirmation before irreversible actions such as sending, purchasing or deleting. Request screenshot for current visual context before and after actions.'] : []),
+            'Reference a credential by known alias only, e.g. [+alias](credential:alias). Authorization is a separate app action. When explicitly asked to write a token to a file, call credential_shell with command file:relative-path; the app approves the destination and writes it without disclosing the secret to you.',
             'Tools run in the integrated Ubuntu environment with Bash and network access when connected. If an ordinary tool is missing, try installing it from its official package registry, e.g. apt-get update followed by apt-get install -y PACKAGE, or use a project-local package manager. Do not stop at a missing dependency declaration. Verify the installation and continue; report concrete errors if the attempts fail.',
             'Routine builds, downloads, installs, and reversible local edits do not require a chat confirmation. An explicit user instruction naming exactly what to delete is consent to prepare that command. Use a standalone rm -- command with exactly those names when deleting named entries in the current project. If the tool requires approval, submit it to the app approval UI directly; do not first ask in chat and then prompt again. When the target or scope is unclear, clarify before preparing it. Keep tool approval for risky operations and Android modifications or credential use.',
             yolo ? 'YOLO is active: make routine implementation and dependency choices independently and finish the requested work. Read-only Android diagnostics such as id, getprop ro.product.model and dumpsys battery may run directly after the app has been connected. Preserve the confirmations for important actions.' : 'Standard mode is active: respect tool approval prompts and ask where important choices need confirmation.'

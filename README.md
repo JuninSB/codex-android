@@ -12,17 +12,42 @@ No Ubuntu integrado, o binário Rust supervisiona o Codex App Server e encaminha
 
 Para testar o transporte localmente, execute `cargo test --locked --manifest-path runtime/Cargo.toml`.
 
-## Build
+## Versões e instalação
 
-Use JDK 17, Gradle 8.10.2, Android SDK 35 com Build Tools 34.0.0 e as ferramentas `curl`, `tar`, `dpkg-deb`, `sha256sum` e `patchelf` (ou Node.js para aplicar a alteração de dependência ELF). Em um host Linux ARM64, forneça um `aapt2` correspondente à arquitetura. O armazenamento de conversas exige `cargo` e `rustc` com o alvo `aarch64-unknown-linux-gnu`. Em compilação cruzada, use `aarch64-linux-gnu-gcc` ou configure `CODEX_CHATSTORE_LINKER`.
+Há dois APKs ARM64, ambos com o mesmo nome de pacote e a mesma assinatura. Escolha **um** deles:
+
+- **Padrão** (`Codex-Mobile-2.1.15-padrao-arm64.apk`): não declara o serviço de acessibilidade e não oferece o controle da tela.
+- **Com controle** (`Codex-Mobile-2.1.15-controle-arm64.apk`): inclui o controle por acessibilidade, com confirmação do bloqueio do dispositivo e encerramento pelo chat ou pela notificação.
+
+Os dois atualizam a mesma instalação quando assinados com a mesma chave. O suporte começa no Android 11. As capturas do controle são solicitadas pelo Codex durante a tarefa; não são uma transmissão contínua de vídeo.
+
+### Instalar a versão com controle pelo Shizuku
+
+O Shizuku e o Termux são necessários apenas para este método de instalação. Inicie o Shizuku via depuração sem fio ou ADB, autorize o Termux no Shizuku e, no aplicativo Shizuku, exporte os arquivos `rish` e `rish_shizuku.dex` para o diretório privado `~/rish` do Termux. No Android 14 ou posterior, deixe o DEX somente de leitura. Com o APK baixado em `Download`, no Termux execute:
 
 ```sh
-./build-native.sh :app:testReleaseUnitTest
+chmod 400 ~/rish/rish_shizuku.dex
+chmod +x ~/rish/rish
+export RISH_APPLICATION_ID=com.termux
+~/rish/rish -c 'id'
+~/rish/rish -c 'if [ -e /data/local/tmp/codex-mobile-2.1.15-controle-arm64.apk ]; then echo Arquivo-temporario-ja-existe; exit 1; fi; cp /sdcard/Download/Codex-Mobile-2.1.15-controle-arm64.apk /data/local/tmp/codex-mobile-2.1.15-controle-arm64.apk && pm install -r /data/local/tmp/codex-mobile-2.1.15-controle-arm64.apk'
 ```
 
-O script baixa os componentes fixados do runtime e gera `app/build/outputs/apk/release/app-release.apk`. O caminho da chave pode ser configurado com `CODEX_MOBILE_KEYSTORE`. Para atualizar um APK instalado, use a mesma chave. Os nomes usados internamente no app e no protocolo independem da conta e da distribuição instaladas anteriormente no Termux.
+Confirme o pedido de instalação no aparelho se aparecer. A cópia em `/data/local/tmp` permite que o instalador Android leia o arquivo; se ela já existir, confira que é a versão desejada antes de repetir o comando. `Success` indica que o instalador aceitou o APK. O método não garante contornar bloqueios do sistema ou do Play Protect; se aparecer `INSTALL_FAILED_USER_RESTRICTED`, confira o pedido exibido e as opções de instalação por depuração do aparelho. Nunca é necessário desinstalar a versão anterior para atualizar com a mesma assinatura.
 
-As listas, folhas modais, animações e superfícies usam Compose e Material 3. Os ícones da interface são Lucide, com a licença incluída no APK. CommonMark interpreta a estrutura Markdown antes da renderização nativa. O backend reaproveita as operações do Codex App Server e responde apenas no loopback com um token efêmero.
+Depois, solicite o controle em uma conversa. Ative **Controle do Codex Mobile** em Acessibilidade e confirme o bloqueio do aparelho para liberar aquela sessão. A acessibilidade deve ser desativada nas configurações do Android se você quiser remover a permissão do sistema, além de encerrar a sessão no app.
+
+## Build
+
+Use JDK 17, Gradle 8.10.2, Android SDK 35 e as dependências do runtime descritas nos scripts do projeto. Em um host Linux ARM64, forneça um `aapt2` correspondente à arquitetura. O armazenamento de conversas exige Rust com o alvo `aarch64-unknown-linux-gnu`.
+
+```sh
+./build-native.sh :app:assembleStandardRelease :app:assembleControlRelease :app:testStandardReleaseUnitTest :app:testControlReleaseUnitTest
+```
+
+Os APKs ficam em `app/build/outputs/apk/standard/release/` e `app/build/outputs/apk/control/release/`. O caminho da chave pode ser configurado com `CODEX_MOBILE_KEYSTORE`. Para atualizar um APK instalado, use a mesma chave.
+
+As listas, folhas modais, animações e superfícies usam Compose e Material 3. Os ícones da interface são Lucide, com a licença incluída no APK. CommonMark interpreta Markdown antes da renderização nativa. O backend responde apenas no loopback com um token efêmero.
 
 ## Ferramentas Android do Codex
 
@@ -37,6 +62,6 @@ No Ubuntu, o mini shell mostra as últimas linhas enquanto o comando roda. Termu
 
 Abra **Menu → Credenciais**, crie uma senha para o cofre e adicione um **Token**, um **Login** ou uma credencial **SSH**. Os nomes, descrições e dados ficam cifrados em armazenamento privado com AES-GCM e uma chave derivada da senha por PBKDF2-HMAC-SHA256.
 
-Em uma conversa nova, peça ao Codex para usar a credencial pelo nome ou digite `+nome` no compositor. O autocomplete fica disponível com o cofre aberto. A primeira solicitação para cada credencial naquela conversa pede a senha. **Bloquear cofre** revoga as permissões em memória para novos comandos.
+Em uma conversa nova, peça ao Codex para usar a credencial pelo nome ou digite `+nome` no compositor. O autocomplete fica disponível com o cofre aberto. Cada solicitação de credencial pede a senha do cofre. **Bloquear cofre** revoga as permissões em memória para novos comandos.
 
-A ferramenta `credential_shell` entrega os dados ao comando do Ubuntu por variáveis de ambiente. O app mascara o segredo literal na saída capturada. O comando autorizado recebe o valor e pode usá-lo para autenticar, por isso confira a ação antes de autorizar.
+A ferramenta `credential_shell` pode autenticar uma solicitação HTTPS ou criar um arquivo novo com um token, conforme o destino aprovado no app. O valor não aparece na resposta da ferramenta; um arquivo criado contém o segredo e fica acessível aos processos que tiverem permissão de lê-lo.

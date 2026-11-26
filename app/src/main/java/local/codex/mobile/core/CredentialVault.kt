@@ -25,7 +25,7 @@ internal data class CredentialLabel(
     fun metadata() = obj("name" to name, "description" to description, "type" to type.name,
         "instructions" to instructions.ifBlank {
             when (type) {
-                CredentialType.TOKEN -> "Use credential_shell com a URL HTTPS aprovada. O app envia o token Bearer."
+                CredentialType.TOKEN -> "Use credential_shell com a URL HTTPS aprovada ou file:caminho para gravar o token solicitado dentro do projeto."
                 CredentialType.LOGIN -> "Use credential_shell com a URL HTTPS aprovada. O app envia a autenticação Basic."
                 CredentialType.SSH -> "Entrada SSH. O app guarda os dados, e a conexão SSH ainda não está disponível nesta interface."
             }

@@ -59,6 +59,8 @@ internal data class MobileState(
     val vaultError: String? = null,
     val credentials: List<CredentialLabel> = emptyList(),
     val credentialRequest: JSONObject? = null,
+    val deviceControlChat: String? = null,
+    val deviceControlRequest: JSONObject? = null,
     val attachments: List<Attachment> = emptyList(),
     val queue: List<QueuedMessage> = emptyList(),
     val sending: String? = null,
@@ -105,6 +107,13 @@ internal class MobileViewModel(application: Application) : AndroidViewModel(appl
     }
 
 
+    suspend fun searchConversations(query: String): List<JSONObject> {
+        if (!state.value.connected) return state.value.chats.filter {
+            !it.optBoolean("archived") && it.optString("title").contains(query, ignoreCase = true)
+        }
+        return client.get("search", mapOf("q" to query)).optJSONArray("results").objects()
+    }
+
     fun setYolo(enabled: Boolean) {
         prefs.edit().putBoolean("yolo", enabled).apply()
         mutable.update { it.copy(yolo = enabled) }
@@ -142,6 +151,8 @@ internal class MobileViewModel(application: Application) : AndroidViewModel(appl
                     }
                 } catch (error: Exception) {
                     if (error is CancellationException) throw error
+                    val status = if (error is CodexHttpException) " HTTP ${error.status}" else ""
+                    android.util.Log.w("CodexRuntime", "Reconexão: ${error.javaClass.simpleName}$status")
                     mutable.update { it.copy(startup = null, connected = false, syncingChat = false,
                         connectionError = "Conexão com o Ubuntu interrompida. Reconectando…") }
                     delay(retryDelay)
@@ -174,6 +185,16 @@ internal class MobileViewModel(application: Application) : AndroidViewModel(appl
                 if (androidInFlight.add(id)) work {
                     try { executeAndroid(chat, id, automatic = true) }
                     finally { androidInFlight.remove(id) }
+                }
+            }
+        }
+        val deviceSession = DeviceControlSession.chat
+        mutable.update { if (it.deviceControlChat != deviceSession) it.copy(deviceControlChat = deviceSession) else it }
+        if (deviceSession != null && deviceSession == current && DeviceControlService.connected) {
+            for (request in data.optJSONArray("approvals").objects()) {
+                val id = request.optString("id")
+                if (request.optJSONObject("params")?.optString("target") == "Controle do dispositivo" && androidInFlight.add(id)) work {
+                    try { executeAndroid(deviceSession, id) } finally { androidInFlight.remove(id) }
                 }
             }
         }
@@ -565,6 +586,35 @@ internal class MobileViewModel(application: Application) : AndroidViewModel(appl
 
     fun report(message: String) = mutable.update { it.copy(error = message) }
 
+    fun requestDeviceControl(request: JSONObject) {
+        mutable.update { it.copy(deviceControlRequest = request) }
+    }
+
+    fun cancelDeviceControlRequest() { mutable.update { it.copy(deviceControlRequest = null) } }
+
+    fun enableDeviceControl() = work {
+        val request = state.value.deviceControlRequest ?: return@work
+        val chat = request.getString("chatId")
+        check(chat == state.value.active && DeviceControlService.connected) { "Ative a acessibilidade e tente novamente." }
+        val id = request.getString("id")
+        check(androidInFlight.add(id)) { "Solicitação já em andamento." }
+        try {
+            DeviceControlSession.start(getApplication(), chat)
+            mutable.update { it.copy(deviceControlChat = chat, deviceControlRequest = null) }
+            executeAndroid(chat, id)
+            refresh()
+        } catch (error: Exception) {
+            DeviceControlSession.stop(getApplication())
+            mutable.update { it.copy(deviceControlChat = null) }
+            throw error
+        } finally { androidInFlight.remove(id) }
+    }
+
+    fun stopDeviceControl() {
+        DeviceControlSession.stop(getApplication())
+        mutable.update { it.copy(deviceControlChat = null, deviceControlRequest = null) }
+    }
+
     fun approve(id: String, allow: Boolean) = work {
         val chat = state.value.active ?: return@work
         val pending = state.value.approvals.firstOrNull { it.optString("id") == id }
@@ -582,7 +632,10 @@ internal class MobileViewModel(application: Application) : AndroidViewModel(appl
         val request = connection.post("android/start", obj("chat" to chat, "id" to id, "automatic" to automatic))
         val target = request.getString("target")
         val result = try {
-            AndroidShell.run(getApplication<Application>(), request.getString("command"),
+            if (target == "Controle do dispositivo") {
+                check(DeviceControlSession.chat == chat) { "Sessão de controle encerrada." }
+                DeviceControlService.execute(request.getString("command"))
+            } else AndroidShell.run(getApplication<Application>(), request.getString("command"),
                 request.string("cwd"), target, request.optBoolean("automatic"), id)
         } catch (error: Exception) {
             if (error is CancellationException) throw error
@@ -591,6 +644,10 @@ internal class MobileViewModel(application: Application) : AndroidViewModel(appl
         }
         if (result.optBoolean("shizukuError")) {
             report(result.string("error") ?: "Não foi possível conectar ao Shizuku.")
+        }
+        if (target == "Controle do dispositivo" && DeviceControlSession.chat != chat) {
+            result.remove("image")
+            result.put("error", "Sessão de controle encerrada.")
         }
         result.put("chat", chat).put("id", id)
         try {

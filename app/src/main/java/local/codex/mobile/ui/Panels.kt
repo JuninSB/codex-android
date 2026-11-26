@@ -30,12 +30,12 @@ import org.json.JSONObject
     create: () -> Unit,
     select: (String) -> Unit,
     settings: () -> Unit,
+    search: () -> Unit,
     vm: MobileViewModel,
     modifier: Modifier = Modifier
 ) {
     var query by rememberSaveable { mutableStateOf("") }
     var archived by rememberSaveable { mutableStateOf(false) }
-    var searching by rememberSaveable { mutableStateOf(false) }
     var chatOptions by remember { mutableStateOf<JSONObject?>(null) }
     chatOptions?.let { selected -> ConversationActions(selected, vm) { chatOptions = null } }
     Column(modifier.fillMaxHeight().padding(14.dp)) {
@@ -45,19 +45,8 @@ import org.json.JSONObject
                 Text("Codex Mobile", style = MaterialTheme.typography.titleLarge)
                 Text("Conversas", color = Ink.Muted, style = MaterialTheme.typography.bodyMedium)
             }
-            ControlButton(R.drawable.symbol_search, "Buscar conversas") { searching = !searching; query = "" }
+            ControlButton(R.drawable.symbol_search, "Buscar conversas", search)
         }
-        if (searching) OutlinedTextField(
-            value = query, onValueChange = { query = it }, singleLine = true,
-            leadingIcon = { Symbol(R.drawable.symbol_search, null, color = Ink.Muted) },
-            placeholder = { Text("Buscar conversas") },
-            shape = RoundedCornerShape(20.dp),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedContainerColor = Ink.Control, unfocusedContainerColor = Ink.Control,
-                focusedBorderColor = Ink.Link, unfocusedBorderColor = Ink.Contour
-            ),
-            modifier = Modifier.fillMaxWidth()
-        )
         Spacer(Modifier.height(14.dp))
         HorizontalDivider(color = Ink.Divider)
         Spacer(Modifier.height(6.dp))

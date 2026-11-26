@@ -1,5 +1,7 @@
 package local.codex.mobile.core
 
+import local.codex.mobile.BuildConfig
+
 import android.content.Context
 import android.net.ConnectivityManager
 import android.os.Environment
@@ -86,6 +88,7 @@ internal class UbuntuRuntime private constructor(private val context: Context) {
                 "LANG=C.UTF-8", "TMPDIR=/tmp", "PATH=/opt/node/bin:/opt/codex/bin:/opt/codex/codex-path:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
                 "CODEX_MOBILE_PORT=$port", "CODEX_MOBILE_TOKEN=$token", "CODEX_MOBILE_WORKSPACE=$workspace",
                 "CODEX_MOBILE_INTERNAL_WORKSPACE=/root/Projetos", "CODEX_MOBILE_EMBEDDED=1",
+                "CODEX_MOBILE_DEVICE_CONTROL=${if (BuildConfig.DEVICE_CONTROL) 1 else 0}",
                 "CODEX_MOBILE_CHATSTORE=/opt/codex-mobile/chatstore",
                 "CODEX_MOBILE_RELAY=/opt/codex-mobile/chatstore",
                 "/opt/node/bin/node", "/opt/codex-mobile/server.mjs"
@@ -102,12 +105,10 @@ internal class UbuntuRuntime private constructor(private val context: Context) {
             val child = builder.start()
             process = child
             Thread({
-                child.inputStream.bufferedReader().useLines { lines ->
-                    lines.forEach { line ->
-                        synchronized(output) {
-                            if (output.size >= 16) output.removeFirst()
-                            output.addLast(line.replace(token, "[local]").take(450))
-                        }
+                drainRuntimeOutput(child.inputStream, { child.isAlive }) { line ->
+                    synchronized(output) {
+                        if (output.size >= 16) output.removeFirst()
+                        output.addLast(line.replace(token, "[local]").take(450))
                     }
                 }
             }, "codex-runtime-output").apply { isDaemon = true; start() }

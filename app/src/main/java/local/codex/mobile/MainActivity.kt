@@ -1,5 +1,7 @@
 package local.codex.mobile
 
+import android.app.Activity
+import android.app.KeyguardManager
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -50,6 +52,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        if (local.codex.mobile.core.DeviceControlSession.chat == null) local.codex.mobile.core.DeviceControlSession.stop(this)
         val prefs = getSharedPreferences("codex-mobile", MODE_PRIVATE)
         setContent {
             MobileTheme {
@@ -103,6 +106,33 @@ class MainActivity : ComponentActivity() {
                 var background by remember { mutableStateOf(prefs.getBoolean("background", false)) }
                 val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
                     if (!granted) vm.report("Ative notificações do Codex Mobile para acompanhar o serviço.")
+                }
+                val devicePassword = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+                    if (result.resultCode == Activity.RESULT_OK) vm.enableDeviceControl()
+                    else vm.cancelDeviceControlRequest()
+                }
+                if (state.deviceControlRequest != null) {
+                    AlertDialog(onDismissRequest = vm::cancelDeviceControlRequest,
+                        title = { Text("Liberar controle do dispositivo?") },
+                        text = { Text("Esta conversa poderá ver a tela, tocar, deslizar e abrir aplicativos até você encerrar o controle. A senha do aparelho será solicitada para liberar a sessão.") },
+                        dismissButton = { TextButton(onClick = vm::cancelDeviceControlRequest) { Text("Cancelar") } },
+                        confirmButton = { TextButton(onClick = {
+                            if (!local.codex.mobile.core.DeviceControlService.connected) {
+                                runCatching { startActivity(Intent(AndroidSettings.ACTION_ACCESSIBILITY_SETTINGS)) }
+                                    .onFailure { vm.report("Não foi possível abrir Acessibilidade.") }
+                                vm.report("Ative Controle do Codex Mobile em Acessibilidade e volte para continuar.")
+                            } else if (android.os.Build.VERSION.SDK_INT >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                                notificationPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                                vm.report("Permita notificações para mostrar e encerrar o controle ativo.")
+                            } else {
+                                val keyguard = getSystemService(KeyguardManager::class.java)
+                                @Suppress("DEPRECATION")
+                                val confirmation = keyguard.createConfirmDeviceCredentialIntent("Liberar controle", "Confirme o bloqueio do aparelho para esta sessão.")
+                                if (confirmation == null) vm.report("Configure um bloqueio de tela com senha, PIN ou padrão para liberar o controle.")
+                                else devicePassword.launch(confirmation)
+                            }
+                        }) { Text("Continuar") } }
+                    )
                 }
                 val setBackground: (Boolean) -> Unit = { enabled ->
                     background = enabled
@@ -247,12 +277,12 @@ class MainActivity : ComponentActivity() {
                                         if (compact) ModalNavigationDrawer(drawerState = drawer, drawerContent = {
                                             ModalDrawerSheet(drawerContainerColor = Ink.Surface, modifier = Modifier.width(drawerWidth),
                                                 drawerShape = androidx.compose.ui.graphics.RectangleShape) {
-                                                ConversationList(state, new, select, settings, vm)
+                                                ConversationList(state, new, select, settings, { scope.launch { drawer.close() }; nav.navigate("search") }, vm)
                                             }
                                         }, content = content)
                                         else Row {
                                             Surface(Modifier.width(288.dp).fillMaxHeight(), color = Ink.Surface) {
-                                                ConversationList(state, new, select, settings, vm)
+                                                ConversationList(state, new, select, settings, { scope.launch { drawer.close() }; nav.navigate("search") }, vm)
                                             }
                                             Box(Modifier.weight(1f)) { content() }
                                         }
@@ -263,6 +293,9 @@ class MainActivity : ComponentActivity() {
                                 )) { entry ->
                                     Explorer(state, vm, entry.arguments?.getString("mode") ?: "projects", granted,
                                         back, askGrant, entry.arguments?.getString("file"))
+                                }
+                                composable("search") {
+                                    SearchScreen(state, vm, back) { id -> vm.select(id); nav.popBackStack() }
                                 }
                                 composable("settings") {
                                     Settings(state, back, { vm.usage(); nav.navigate("usage") }, askGrant, vm::logout, connectTermux, connectShizuku, background, setBackground)

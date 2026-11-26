@@ -250,6 +250,12 @@ internal fun effortName(name: String?) = when (name) {
                     Modifier.padding(start = 10.dp, bottom = 6.dp), color = Ink.Muted,
                     style = MaterialTheme.typography.bodyMedium)
             }
+            if (state.deviceControlChat == state.active && state.active != null) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Controle do dispositivo ativo", Modifier.weight(1f), color = Ink.Muted, style = MaterialTheme.typography.bodyMedium)
+                    TextButton(onClick = vm::stopDeviceControl) { Text("Encerrar") }
+                }
+            }
             if (ready) for (request in state.approvals) Approval(request, vm)
             AnimatedVisibility(state.running && activeCommand == null) {
                 Text("Codex trabalhando…", Modifier.padding(start = 10.dp, bottom = 6.dp),
@@ -538,7 +544,9 @@ private fun durationText(millis: Long): String {
             else Text(command, Modifier.heightIn(max = 120.dp).verticalScroll(rememberScrollState()), style = mono)
             Row {
                 TextButton(onClick = { vm.approve(request.optString("id"), false) }) { Text("Recusar") }
-                TextButton(onClick = { vm.approve(request.optString("id"), true) }) { Text("Permitir") }
+                if (target == "Controle do dispositivo") {
+                    TextButton(onClick = { vm.requestDeviceControl(request) }) { Text("Liberar controle") }
+                } else TextButton(onClick = { vm.approve(request.optString("id"), true) }) { Text("Permitir") }
             }
         }
     }

@@ -11,11 +11,22 @@ android {
         applicationId = "local.codex.mobile"
         minSdk = 30
         targetSdk = 35
-        versionCode = 17
-        versionName = "2.1.13"
+        versionCode = 19
+        versionName = "2.1.15"
         ndk { abiFilters += "arm64-v8a" }
     }
-    buildFeatures { compose = true }
+    flavorDimensions += "deviceControl"
+    productFlavors {
+        create("standard") {
+            dimension = "deviceControl"
+            buildConfigField("boolean", "DEVICE_CONTROL", "false")
+        }
+        create("control") {
+            dimension = "deviceControl"
+            buildConfigField("boolean", "DEVICE_CONTROL", "true")
+        }
+    }
+    buildFeatures { compose = true; buildConfig = true }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17

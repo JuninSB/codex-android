@@ -23,6 +23,7 @@
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Manter o ambiente de desenvolvimento e os comandos do Codex ativos durante uma tarefa iniciada pelo usuário" />
         </service>
+        <receiver android:name=".core.StopDeviceControlReceiver" android:exported="false" />
         <receiver android:name=".core.TermuxResultReceiver" android:exported="false" />
         <activity android:name=".MainActivity" android:exported="true" android:windowSoftInputMode="stateAlwaysHidden|adjustResize">
             <intent-filter>
