@@ -11,8 +11,8 @@ android {
         applicationId = "local.codex.mobile"
         minSdk = 30
         targetSdk = 35
-        versionCode = 16
-        versionName = "2.1.12"
+        versionCode = 17
+        versionName = "2.1.13"
         ndk { abiFilters += "arm64-v8a" }
     }
     buildFeatures { compose = true }
