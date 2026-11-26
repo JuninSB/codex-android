@@ -59,13 +59,16 @@ internal data class MobileState(
     val vaultError: String? = null,
     val credentials: List<CredentialLabel> = emptyList(),
     val credentialRequest: JSONObject? = null,
+    val credentialSessionChat: String? = null,
     val deviceControlChat: String? = null,
     val deviceControlRequest: JSONObject? = null,
     val attachments: List<Attachment> = emptyList(),
     val queue: List<QueuedMessage> = emptyList(),
     val sending: String? = null,
     val networkAvailable: Boolean = true,
-    val yolo: Boolean = false
+    val yolo: Boolean = false,
+    val preferredModel: String? = null,
+    val preferredEffort: String? = null
 ) {
     val running get() = connected && chat?.optBoolean("running") == true
 }
@@ -76,10 +79,14 @@ internal class MobileViewModel(application: Application) : AndroidViewModel(appl
     private val prefs = application.getSharedPreferences("codex-mobile", 0)
     private val vault = CredentialVault(application)
     private var vaultSession: CredentialVault.Session? = null
+    private var credentialSessionChat: String? = null
+    private var activeDeviceTurnChat: String? = null
     private val androidInFlight = mutableSetOf<String>()
     private val mutable = MutableStateFlow(MobileState(
         vaultExists = vault.exists(),
         yolo = prefs.getBoolean("yolo", false),
+        preferredModel = prefs.getString("preferred-model", null),
+        preferredEffort = prefs.getString("preferred-effort", null),
         queue = runCatching { JSONArray(prefs.getString("outbox", "[]")) }.getOrNull().objects().map {
             QueuedMessage(it.getString("id"), it.getString("chat"), it.getString("text"),
                 it.getJSONArray("attachments"), it.optBoolean("createChat"), it.optBoolean("yolo"), it.string("error"))
@@ -198,6 +205,22 @@ internal class MobileViewModel(application: Application) : AndroidViewModel(appl
                 }
             }
         }
+        val credentialChat = credentialSessionChat
+        val credentialVault = vaultSession
+        if (credentialChat != null && credentialChat == current && credentialVault != null) {
+            for (request in data.optJSONArray("approvals").objects()) {
+                val id = request.optString("id")
+                if (request.optBoolean("credential") && androidInFlight.add(id)) work {
+                    try {
+                        val alias = request.optJSONObject("params")?.optString("name")
+                        val entry = credentialVault.entries.firstOrNull { it.label.name == alias }
+                        if (credentialSessionChat == credentialChat && vaultSession === credentialVault && entry != null)
+                            sendCredential(credentialChat, id, entry)
+                        else client.post("approval", obj("chat" to credentialChat, "id" to id, "allow" to false))
+                    } finally { androidInFlight.remove(id) }
+                }
+            }
+        }
         if (data.optBoolean("unchanged")) return
         val version = data.optInt("version")
         if (version == lastVersion && current == lastChat) return
@@ -225,6 +248,11 @@ internal class MobileViewModel(application: Application) : AndroidViewModel(appl
             if (chatCache.size > 6) chatCache.remove(chatCache.keys.first())
         }
         val titles = data.optJSONArray("chats").objects()
+        val controlling = deviceSession != null && activeDeviceTurnChat == deviceSession && titles.any {
+            it.optString("id") == deviceSession && it.optBoolean("running")
+        }
+        if (!controlling) activeDeviceTurnChat = null
+        DeviceControlService.setOverlay(controlling)
         val catalog = JSONArray(titles.map { row ->
             obj("id" to row.optString("id"), "title" to row.optString("title"),
                 "pinned" to row.optBoolean("pinned"), "archived" to row.optBoolean("archived"))
@@ -301,15 +329,19 @@ internal class MobileViewModel(application: Application) : AndroidViewModel(appl
     }
     fun newChat() = switch(null)
 
+    private fun newChatOptions(id: String? = null, cwd: String? = null) = obj(
+        "id" to id, "cwd" to cwd, "model" to prefs.getString("preferred-model", null),
+        "effort" to prefs.getString("preferred-effort", null))
+
     private suspend fun ensureChat(cwd: String? = null): String {
         val before = state.value
         if (before.active != null) {
             if (before.queue.any { it.chat == before.active && it.createChat }) {
-                client.post("new", obj("id" to before.active, "cwd" to cwd))
+                client.post("new", newChatOptions(before.active, cwd))
             }
             return before.active
         }
-        val id = client.post("new", obj("cwd" to cwd)).getString("id")
+        val id = client.post("new", newChatOptions(cwd = cwd)).getString("id")
         drafts[id] = before.prompt to before.attachments
         switch(id)
         refresh()
@@ -347,6 +379,8 @@ internal class MobileViewModel(application: Application) : AndroidViewModel(appl
     fun configure(model: String, effort: String, applied: () -> Unit) = work(true) {
         val id = ensureChat()
         client.post("settings", obj("chat" to id, "model" to model, "effort" to effort))
+        prefs.edit().putString("preferred-model", model).putString("preferred-effort", effort).apply()
+        mutable.update { it.copy(preferredModel = model, preferredEffort = effort) }
         refresh()
         applied()
     }
@@ -494,7 +528,7 @@ internal class MobileViewModel(application: Application) : AndroidViewModel(appl
         } ?: return
         mutable.update { it.copy(sending = entry.id) }
         try {
-            if (entry.createChat) client.post("new", obj("id" to entry.chat))
+            if (entry.createChat) client.post("new", newChatOptions(id = entry.chat))
             val aliases = mentionedAliases(entry.text)
             val metadata = vaultSession?.entries.orEmpty().filter { it.label.name in aliases }.map(Credential::metadata)
             client.post("send", entry.json().put("requestId", entry.id).put("credentialMetadata", JSONArray(metadata)))
@@ -530,7 +564,8 @@ internal class MobileViewModel(application: Application) : AndroidViewModel(appl
 
     fun lockVault() {
         vaultSession = null
-        mutable.update { it.copy(vaultUnlocked = false, credentials = emptyList(),
+        credentialSessionChat = null
+        mutable.update { it.copy(vaultUnlocked = false, credentials = emptyList(), credentialSessionChat = null,
             vaultError = null, credentialRequest = null) }
     }
 
@@ -574,8 +609,9 @@ internal class MobileViewModel(application: Application) : AndroidViewModel(appl
         val entry = session.entries.firstOrNull { it.label.name == name }
             ?: error("Credencial +$name não encontrada no cofre.")
         sendCredential(chat, id, entry)
+        credentialSessionChat = chat
         vaultSession = session
-        mutable.update { it.copy(credentialRequest = null, vaultUnlocked = true,
+        mutable.update { it.copy(credentialRequest = null, vaultUnlocked = true, credentialSessionChat = chat,
             credentials = session.entries.map(Credential::label)) }
         refresh()
     }
@@ -611,6 +647,7 @@ internal class MobileViewModel(application: Application) : AndroidViewModel(appl
     }
 
     fun stopDeviceControl() {
+        activeDeviceTurnChat = null
         DeviceControlSession.stop(getApplication())
         mutable.update { it.copy(deviceControlChat = null, deviceControlRequest = null) }
     }
@@ -634,6 +671,8 @@ internal class MobileViewModel(application: Application) : AndroidViewModel(appl
         val result = try {
             if (target == "Controle do dispositivo") {
                 check(DeviceControlSession.chat == chat) { "Sessão de controle encerrada." }
+                activeDeviceTurnChat = chat
+                DeviceControlService.setOverlay(true)
                 DeviceControlService.execute(request.getString("command"))
             } else AndroidShell.run(getApplication<Application>(), request.getString("command"),
                 request.string("cwd"), target, request.optBoolean("automatic"), id)

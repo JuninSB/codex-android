@@ -126,19 +126,19 @@ import local.codex.mobile.core.string
     var password by remember(request.optString("id")) { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = { if (!state.vaultBusy) vm.closeCredentialRequest() },
-        title = { Text("Autorizar +$alias") },
+        title = { Text("Liberar credenciais nesta conversa") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 val target = request.optJSONObject("params")?.string("command").orEmpty()
-                Text(if (target.startsWith("file:")) "Criar um arquivo com o token dentro da pasta do projeto?"
-                    else "Aprovar uma solicitação HTTPS com esta credencial?")
+                Text("A senha libera as credenciais para esta conversa até bloquear o cofre. Primeira solicitação: +$alias.")
+                Text(if (target.startsWith("file:")) "Criar arquivo com o token:" else "Solicitação HTTPS:")
                 request.optJSONObject("params")?.string("command")?.let { Text(it, style = mono) }
                 PasswordField(password, { password = it }, "Senha do cofre")
                 state.vaultError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             }
         },
         confirmButton = { TextButton(onClick = { vm.authorizeCredential(password) },
-            enabled = !state.vaultBusy && password.isNotEmpty()) { Text("Autorizar solicitação") } },
+            enabled = !state.vaultBusy && password.isNotEmpty()) { Text("Liberar nesta conversa") } },
         dismissButton = { TextButton(onClick = vm::closeCredentialRequest, enabled = !state.vaultBusy) { Text("Cancelar") } },
         properties = DialogProperties(securePolicy = SecureFlagPolicy.SecureOn)
     )

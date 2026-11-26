@@ -134,10 +134,10 @@ const androidTools = embedded ? [
   { type: 'function', name: 'termux_shell', description: 'Run Bash in the separately installed Android Termux app only when explicitly needed. Ubuntu is the default for ordinary work. In YOLO mode, approved read-only diagnostics run directly; other commands require confirmation.', inputSchema: {
     type: 'object', properties: { command: { type: 'string' }, cwd: { type: 'string', description: 'Optional absolute Termux working directory; defaults to its home.' } }, required: ['command'], additionalProperties: false
   } },
-  { type: 'function', name: 'device_control', description: 'Control the Android screen only after the user authorizes this chat. Request screenshot to see the current screen; use tap, long_press, swipe, back, home or open_app to interact. Coordinates use screenshot pixels. Take a fresh screenshot after actions.', inputSchema: {
-    type: 'object', properties: { action: { type: 'string', enum: ['screenshot','tap','long_press','swipe','back','home','open_app'] }, x: { type: 'integer' }, y: { type: 'integer' }, x2: { type: 'integer' }, y2: { type: 'integer' }, duration: { type: 'integer' }, package: { type: 'string' } }, required: ['action'], additionalProperties: false
+  { type: 'function', name: 'device_control', description: 'Control the Android screen only after the user authorizes this chat. Request screenshot to see the current screen; use tap, long_press, swipe, back, home or open_app to interact. Use speak for a short progress line in the floating indicator. Coordinates use screenshot pixels. Take a fresh screenshot after actions.', inputSchema: {
+    type: 'object', properties: { action: { type: 'string', enum: ['screenshot','tap','long_press','swipe','back','home','open_app','speak'] }, x: { type: 'integer' }, y: { type: 'integer' }, x2: { type: 'integer' }, y2: { type: 'integer' }, duration: { type: 'integer' }, package: { type: 'string' }, message: { type: 'string', maxLength: 120 } }, required: ['action'], additionalProperties: false
   } },
-  { type: 'function', name: 'adb_shell', description: 'Run a command in Android adb shell through Shizuku (shell UID 2000). Use the shell command itself, without the adb shell prefix. In YOLO mode, approved read-only diagnostics run directly; other commands require confirmation.', inputSchema: {
+  { type: 'function', name: 'adb_shell', description: 'Run a command in Android adb shell through Shizuku (shell UID 2000). Use the shell command itself, without the adb shell prefix. In YOLO mode commands run directly through an already connected Shizuku. Otherwise the app asks for approval.', inputSchema: {
     type: 'object', properties: { command: { type: 'string' } }, required: ['command'], additionalProperties: false
   } }
 ] : [];
@@ -298,7 +298,8 @@ function notify({ method, params: p = {}, id }) {
       const key = 'android-' + randomUUID();
       const timer = setTimeout(() => finishBridge(key, { error: 'Execução Android expirou.' }), 150000);
       timer.unref();
-      const routine = !credentialCall && !deviceCall && yoloTurns.has(chat.id) ? routineAndroidQuery(command, cwd, target) : null;
+      const routine = !credentialCall && !deviceCall && yoloTurns.has(chat.id) ?
+        (target === 'ADB shell' ? command : routineAndroidQuery(command, cwd, target)) : null;
       bridgeCalls.set(key, { request: id, chat, target, command: routine ?? command, cwd, timer, alias: credentialCall ? alias : null, credentialUrl, credentialFile });
       const automatic = routine !== null;
       approvals.set(key, { id: key, chatId: chat.id, android: !credentialCall, credential: credentialCall, automatic,
@@ -493,7 +494,7 @@ async function selectable(value, artifacts = false) {
 }
 const validId = value => typeof value === 'string' && /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/.test(value);
 const creatingChats = new Map();
-async function createChat(id, requestedDirectory) {
+async function createChat(id, requestedDirectory, preferredModel, preferredEffort) {
   let cwd = requestedDirectory ? await directory(requestedDirectory) : path.join(workspace, id);
   if (!requestedDirectory) {
     try { await fs.mkdir(cwd, { recursive: true }); }
@@ -510,7 +511,9 @@ async function createChat(id, requestedDirectory) {
     storage = internalWorkspace;
     await fs.mkdir(path.join(storage, id), { recursive: true });
   }
-  const chat = { id, cwd, storage, title: 'Nova conversa', createdAt: Date.now(), messages: [] };
+  const chat = { id, cwd, storage, title: 'Nova conversa', createdAt: Date.now(), messages: [],
+    ...(typeof preferredModel === 'string' && preferredModel.length <= 120 && preferredModel ? { model: preferredModel } : {}),
+    ...(typeof preferredEffort === 'string' && preferredEffort.length <= 40 && preferredEffort ? { effort: preferredEffort } : {}) };
   chats.set(id, chat);
   try { await save(chat); }
   catch (error) { chats.delete(id); throw error; }
@@ -781,7 +784,7 @@ http.createServer(async (request, response) => {
       let creation = creatingChats.get(id);
       if (!creation) {
         if (chats.has(id) || summaries.has(id)) return reply(await getChat(id));
-        creation = createChat(id, data.cwd).finally(() => creatingChats.delete(id));
+        creation = createChat(id, data.cwd, data.model, data.effort).finally(() => creatingChats.delete(id));
         creatingChats.set(id, creation);
       }
       return reply(await creation, 201);
@@ -1016,11 +1019,11 @@ http.createServer(async (request, response) => {
             'When referencing a user message, use [mensagem](message:N) with its 1-based user message number.',
             'Use Markdown links to show existing paths, e.g. [arquivo](./relatorio.md) and [pasta](./Anexos/).',
             'Use Markdown images for local images, e.g. ![prévia](./figura.png). Percent-encode spaces in paths.',
-            ...(deviceControlEnabled ? ['Use device_control to inspect or interact with the Android screen when requested. If device_control is unavailable in an older thread, use adb_shell with command codex-device: followed by JSON, for example codex-device:{\"action\":\"screenshot\"}. Supported actions are screenshot, tap, long_press, swipe, back, home and open_app. Gestures use integer x, y, optional x2, y2 and duration; open_app uses package. A password-protected session is required. Ask for explicit confirmation before irreversible actions such as sending, purchasing or deleting. Request screenshot for current visual context before and after actions.'] : []),
+            ...(deviceControlEnabled ? ['Use device_control to inspect or interact with the Android screen when requested. If device_control is unavailable in an older thread, use adb_shell with command codex-device: followed by JSON, for example codex-device:{\"action\":\"screenshot\"}. Supported actions are screenshot, tap, long_press, swipe, back, home, open_app and speak. Use speak with a brief message to describe current progress in the floating indicator; never include passwords or tokens. Gestures use integer x, y, optional x2, y2 and duration; open_app uses package. A password-protected session is required. Ask for explicit confirmation before irreversible actions such as sending, purchasing or deleting. Request screenshot for current visual context before and after actions.'] : []),
             'Reference a credential by known alias only, e.g. [+alias](credential:alias). Authorization is a separate app action. When explicitly asked to write a token to a file, call credential_shell with command file:relative-path; the app approves the destination and writes it without disclosing the secret to you.',
             'Tools run in the integrated Ubuntu environment with Bash and network access when connected. If an ordinary tool is missing, try installing it from its official package registry, e.g. apt-get update followed by apt-get install -y PACKAGE, or use a project-local package manager. Do not stop at a missing dependency declaration. Verify the installation and continue; report concrete errors if the attempts fail.',
             'Routine builds, downloads, installs, and reversible local edits do not require a chat confirmation. An explicit user instruction naming exactly what to delete is consent to prepare that command. Use a standalone rm -- command with exactly those names when deleting named entries in the current project. If the tool requires approval, submit it to the app approval UI directly; do not first ask in chat and then prompt again. When the target or scope is unclear, clarify before preparing it. Keep tool approval for risky operations and Android modifications or credential use.',
-            yolo ? 'YOLO is active: make routine implementation and dependency choices independently and finish the requested work. Read-only Android diagnostics such as id, getprop ro.product.model and dumpsys battery may run directly after the app has been connected. Preserve the confirmations for important actions.' : 'Standard mode is active: respect tool approval prompts and ask where important choices need confirmation.'
+            yolo ? 'YOLO is active: make routine implementation and dependency choices independently and finish the requested work. ADB commands run directly after Shizuku is connected. Use device_control for visual interaction, and honor explicit confirmation requests for irreversible actions.' : 'Standard mode is active: respect tool approval prompts and ask where important choices need confirmation.'
           ].join('\n'), text_elements: [] });
         }
         for (const { file, image } of paths) if (image) input.push({ type: 'localImage', path: file });

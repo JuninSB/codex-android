@@ -110,13 +110,13 @@ import org.json.JSONObject
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable internal fun ConfigurationSheet(state: MobileState, dismiss: () -> Unit, apply: (String, String) -> Unit) {
-    val originalModel = state.chat?.string("model").orEmpty()
-    val originalEffort = state.chat?.string("effort").orEmpty()
+    val originalModel = (state.chat?.string("model") ?: if (state.active == null) state.preferredModel else null).orEmpty()
+    val originalEffort = (state.chat?.string("effort") ?: if (state.active == null) state.preferredEffort else null).orEmpty()
     var model by rememberSaveable { mutableStateOf(originalModel) }
     var effort by rememberSaveable { mutableStateOf(originalEffort) }
     val catalog = state.catalog.mapNotNull { entry -> entry.string("model")?.let { it to (entry.string("displayName") ?: it) } }
     val modelEntry = state.catalog.firstOrNull { it.string("model") == model }
-        ?: state.catalog.firstOrNull { it.optBoolean("isDefault") }
+        ?: state.catalog.firstOrNull { model.isBlank() && it.optBoolean("isDefault") }
     val efforts = modelEntry?.optJSONArray("supportedReasoningEfforts").objects().mapNotNull { entry ->
         entry.string("reasoningEffort")?.let { it to effortName(it) }
     }

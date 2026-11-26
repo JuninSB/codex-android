@@ -58,6 +58,24 @@ internal fun effortName(name: String?) = when (name) {
     else -> name ?: "Esforço"
 }
 
+private sealed interface ChatRow {
+    val key: String
+    data class Message(val value: JSONObject) : ChatRow { override val key = value.optString("id") }
+    data class DeviceActions(val entries: List<JSONObject>) : ChatRow { override val key = "device-" + entries.first().optString("id") }
+}
+
+private fun groupDeviceActions(messages: List<JSONObject>): List<ChatRow> {
+    val result = mutableListOf<ChatRow>()
+    val group = mutableListOf<JSONObject>()
+    fun flush() { if (group.isNotEmpty()) { result.add(ChatRow.DeviceActions(group.toList())); group.clear() } }
+    for (entry in messages) {
+        if (entry.optString("type") == "command" && entry.optString("environment") in setOf("Controle do dispositivo", "ADB shell")) group.add(entry)
+        else { flush(); result.add(ChatRow.Message(entry)) }
+    }
+    flush()
+    return result
+}
+
 @Composable internal fun ChatScreen(
     state: MobileState,
     vm: MobileViewModel,
@@ -75,9 +93,10 @@ internal fun effortName(name: String?) = when (name) {
 ) {
     val chat = state.chat
     val title = chat?.string("title") ?: "Nova conversa"
-    val model = chat?.string("model")
+    val model = chat?.string("model") ?: if (state.active == null) state.preferredModel else null
     val displayModel = state.catalog.firstOrNull { it.string("model") == model }?.string("displayName") ?: model
     val messages = remember(chat) { chat?.optJSONArray("messages").objects() }
+    val rows = remember(messages) { groupDeviceActions(messages) }
     val pending = state.queue.filter { entry ->
         entry.chat == state.active && messages.none { it.optString("id") == entry.id && entry.error == null }
     }
@@ -93,7 +112,7 @@ internal fun effortName(name: String?) = when (name) {
         (state.connected && !state.accountLoaded)
     val lastMessage = messages.lastOrNull()
     val activeCommand = if (state.running) messages.lastOrNull {
-        it.string("type") == "command" && it.string("status") in setOf("inProgress", "in_progress", null)
+        it.string("type") == "command" && it.string("environment") !in setOf("Controle do dispositivo", "ADB shell") && it.string("status") in setOf("inProgress", "in_progress", null)
     } else null
     var pinned by remember(state.active) { mutableStateOf(true) }
     var highlighted by remember(state.active) { mutableStateOf<String?>(null) }
@@ -104,7 +123,10 @@ internal fun effortName(name: String?) = when (name) {
             vm.report("Mensagem $target não encontrada neste chat.")
         } else {
             pinned = false
-            list.scrollToItem(result.index)
+            val rowIndex = rows.indexOfFirst { row ->
+                row is ChatRow.Message && row.value.optString("id") == result.value.optString("id")
+            }
+            if (rowIndex >= 0) list.scrollToItem(rowIndex)
             highlighted = result.value.string("id")
         }
         onMessageOpened()
@@ -121,8 +143,8 @@ internal fun effortName(name: String?) = when (name) {
             if (scrolling) pinned = !canScroll
         }
     }
-    LaunchedEffect(state.active, messages.size, pending.size, lastMessage?.toString()) {
-        if (pinned && messages.size + pending.size > 0) list.scrollToItem(messages.size + pending.size - 1)
+    LaunchedEffect(state.active, rows.size, pending.size, lastMessage?.toString()) {
+        if (pinned && rows.size + pending.size > 0) list.scrollToItem(rows.size + pending.size - 1)
     }
 
     Column(Modifier.fillMaxSize()) {
@@ -177,7 +199,7 @@ internal fun effortName(name: String?) = when (name) {
                         DropdownMenuItem(
                             text = { Column {
                                 Text("Modo YOLO")
-                                Text("Instala no Ubuntu e agiliza consultas no Android", color = Ink.Muted,
+                                Text("Executa comandos no Ubuntu e ADB sem confirmação", color = Ink.Muted,
                                     style = MaterialTheme.typography.bodySmall)
                             } },
                             trailingIcon = { Switch(checked = state.yolo, onCheckedChange = null) },
@@ -201,11 +223,17 @@ internal fun effortName(name: String?) = when (name) {
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                items(messages, key = { it.getString("id") }) { message ->
-                    val highlight by animateColorAsState(
-                        if (highlighted == message.string("id")) Ink.Accent.copy(alpha = .16f)
-                        else androidx.compose.ui.graphics.Color.Transparent, label = "Mensagem referenciada")
-                    Box(Modifier.fillMaxWidth().background(highlight, RoundedCornerShape(18.dp))) { Message(message, vm::stopTool, vm::prompt) }
+                items(rows, key = { it.key }) { row ->
+                    when (row) {
+                        is ChatRow.Message -> {
+                            val highlight by animateColorAsState(
+                                if (highlighted == row.value.string("id")) Ink.Accent.copy(alpha = .16f)
+                                else androidx.compose.ui.graphics.Color.Transparent, label = "Mensagem referenciada")
+                            Box(Modifier.fillMaxWidth().background(highlight, RoundedCornerShape(18.dp))) { Message(row.value, vm::stopTool, vm::prompt) }
+                        }
+                        is ChatRow.DeviceActions -> DeviceActionGroup(row.entries,
+                            state.running && rows.lastOrNull()?.key == row.key, vm::stopTool)
+                    }
                 }
                 items(pending, key = { "queued-" + it.id }) { entry ->
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End,
@@ -256,7 +284,7 @@ internal fun effortName(name: String?) = when (name) {
                     TextButton(onClick = vm::stopDeviceControl) { Text("Encerrar") }
                 }
             }
-            if (ready) for (request in state.approvals) Approval(request, vm)
+            if (ready) for (request in state.approvals.filterNot { it.optBoolean("credential") && state.credentialSessionChat == state.active }) Approval(request, vm)
             AnimatedVisibility(state.running && activeCommand == null) {
                 Text("Codex trabalhando…", Modifier.padding(start = 10.dp, bottom = 6.dp),
                     color = Ink.Muted, style = MaterialTheme.typography.bodyMedium)
@@ -444,6 +472,48 @@ private fun durationText(millis: Long): String {
         if (seconds >= 60) add("${seconds / 60 % 60}m")
         add("${seconds % 60}s")
     }.joinToString(" ")
+}
+
+@Composable private fun DeviceActionGroup(entries: List<JSONObject>, active: Boolean, stop: (String, String?) -> Unit) {
+    var expanded by rememberSaveable(entries.first().optString("id")) { mutableStateOf(false) }
+    val rotation by animateFloatAsState(if (expanded) 180f else 0f, label = "Ações do dispositivo")
+    Surface(color = Ink.Surface, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
+        Column {
+            Row(Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(horizontal = 12.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Symbol(R.drawable.symbol_terminal, null, color = Ink.Link)
+                Column(Modifier.weight(1f)) {
+                    Text(if (active) "Codex está controlando o dispositivo…" else "Codex controlou o dispositivo", style = MaterialTheme.typography.bodyMedium)
+                    Text("${entries.size} ${if (entries.size == 1) "ação" else "ações"}", color = Ink.Muted, style = MaterialTheme.typography.bodySmall)
+                }
+                if (active) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                Symbol(R.drawable.symbol_expand_more, null, Modifier.rotate(rotation), Ink.Muted)
+            }
+            AnimatedVisibility(expanded) {
+                Column(Modifier.padding(start = 12.dp, end = 12.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    entries.forEach { entry ->
+                        val raw = entry.optString("text")
+                        val action = runCatching { JSONObject(raw).optString("action") }.getOrDefault("")
+                        val label = when (action) {
+                            "screenshot" -> "Capturou a tela"
+                            "tap" -> "Tocou na tela"
+                            "long_press" -> "Segurou na tela"
+                            "swipe" -> "Deslizou na tela"
+                            "home" -> "Abriu a tela inicial"
+                            "back" -> "Voltou"
+                            "open_app" -> "Abriu um aplicativo"
+                            "speak" -> "Atualizou o indicador"
+                            else -> raw
+                        }
+                        val failed = entry.optString("status") in setOf("failed", "interrupted", "declined")
+                        Text((if (failed) "Falhou: " else "") + label, style = MaterialTheme.typography.bodySmall, color = if (failed) MaterialTheme.colorScheme.error else Ink.Muted)
+                        if (entry.optString("status") in setOf("inProgress", "in_progress"))
+                            TextButton(onClick = { stop(entry.optString("id"), entry.string("environment")) }) { Text("Interromper") }
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Composable private fun MiniShell(command: JSONObject, stop: (String, String?) -> Unit) {

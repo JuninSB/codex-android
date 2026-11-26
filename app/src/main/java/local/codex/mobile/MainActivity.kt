@@ -121,9 +121,6 @@ class MainActivity : ComponentActivity() {
                                 runCatching { startActivity(Intent(AndroidSettings.ACTION_ACCESSIBILITY_SETTINGS)) }
                                     .onFailure { vm.report("Não foi possível abrir Acessibilidade.") }
                                 vm.report("Ative Controle do Codex Mobile em Acessibilidade e volte para continuar.")
-                            } else if (android.os.Build.VERSION.SDK_INT >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-                                notificationPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
-                                vm.report("Permita notificações para mostrar e encerrar o controle ativo.")
                             } else {
                                 val keyguard = getSystemService(KeyguardManager::class.java)
                                 @Suppress("DEPRECATION")

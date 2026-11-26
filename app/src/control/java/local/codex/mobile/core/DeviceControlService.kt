@@ -21,20 +21,75 @@ class DeviceControlService : AccessibilityService() {
     companion object {
         @Volatile private var instance: DeviceControlService? = null
         val connected get() = instance != null
+        internal fun setOverlay(active: Boolean, message: String? = null) {
+            instance?.let { service -> android.os.Handler(android.os.Looper.getMainLooper()).post {
+                if (active) service.showIndicator(message) else service.hideIndicator()
+            } }
+        }
         internal suspend fun execute(command: String): JSONObject {
             val service = instance ?: error("Ative o serviço de acessibilidade Controle do Codex Mobile.")
             return service.perform(JSONObject(command))
         }
     }
+    private var indicator: DeviceControlIndicator? = null
+    private var indicatorManager: android.view.WindowManager? = null
+
     override fun onServiceConnected() { instance = this }
     override fun onInterrupt() = Unit
-    override fun onUnbind(intent: Intent?): Boolean { instance = null; DeviceControlSession.stop(this); return super.onUnbind(intent) }
-    override fun onDestroy() { instance = null; DeviceControlSession.stop(this); super.onDestroy() }
+    override fun onUnbind(intent: Intent?): Boolean { hideIndicator(); instance = null; DeviceControlSession.stop(this); return super.onUnbind(intent) }
+    override fun onDestroy() { hideIndicator(); instance = null; DeviceControlSession.stop(this); super.onDestroy() }
     override fun onAccessibilityEvent(event: AccessibilityEvent?) = Unit
 
+    private fun showIndicator(message: String?) {
+        var view = indicator
+        if (view == null) {
+            view = DeviceControlIndicator(this)
+            val manager = getSystemService(android.view.WindowManager::class.java)
+            val params = android.view.WindowManager.LayoutParams(
+                android.view.WindowManager.LayoutParams.MATCH_PARENT, android.view.WindowManager.LayoutParams.MATCH_PARENT,
+                android.view.WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    android.view.WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                    android.view.WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                    android.view.WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                android.graphics.PixelFormat.TRANSLUCENT
+            ).apply {
+                gravity = android.view.Gravity.TOP or android.view.Gravity.START
+                if (Build.VERSION.SDK_INT >= 28) layoutInDisplayCutoutMode = android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            }
+            try { manager.addView(view, params) } catch (_: Exception) { return }
+            indicator = view
+            indicatorManager = manager
+        }
+        if (message != null) view.updateMessage(message)
+    }
+
+    private fun hideIndicator() {
+        indicator?.let { view -> runCatching { indicatorManager?.removeViewImmediate(view) } }
+        indicator = null
+        indicatorManager = null
+    }
+
     private suspend fun perform(action: JSONObject): JSONObject = withContext(Dispatchers.Main) {
-        when (action.getString("action")) {
+        val actionName = action.getString("action")
+        showIndicator(when (actionName) {
+            "screenshot" -> "Verificando a tela…"
+            "tap" -> "Tocando na tela…"
+            "long_press" -> "Segurando na tela…"
+            "swipe" -> "Deslizando na tela…"
+            "back" -> "Voltando…"
+            "home" -> "Abrindo a tela inicial…"
+            "open_app" -> "Abrindo aplicativo…"
+            else -> null
+        })
+        when (actionName) {
             "screenshot" -> screenshot()
+            "speak" -> {
+                val message = action.optString("message").trim()
+                require(message.isNotEmpty() && message.length <= 120 && message.none { it.isISOControl() }) { "Informe uma mensagem curta para o indicador." }
+                showIndicator(message)
+                obj("exit" to 0, "stdout" to "Mensagem exibida no indicador.")
+            }
             "tap", "long_press", "swipe" -> {
                 val metrics = resources.displayMetrics
                 fun coordinate(name: String, max: Int): Float {
